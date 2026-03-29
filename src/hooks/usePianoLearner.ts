@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MutableRefObject,
 } from 'react'
 import type { Soundfont } from 'smplr'
 import { loadAcousticGrandPiano } from '../audio/pianoInstrument'
@@ -34,10 +35,16 @@ export type UsePianoLearnerOptions = {
   onLoopCleared?: () => void
   /** Set loop (1s window) centered on current playhead — MIDI “record” / learned control. */
   onLoopAtPlayhead?: () => void
+  /**
+   * When `.current` is true, Space / arrows / Home do not control transport (e.g. settings modal open).
+   * MIDI learn mode blocks those keys inside the hook regardless.
+   */
+  keyboardTransportBlockedRef?: MutableRefObject<boolean>
 }
 
 export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
-  const { onLoopCleared, onLoopAtPlayhead } = options
+  const { onLoopCleared, onLoopAtPlayhead, keyboardTransportBlockedRef } =
+    options
   const onLoopAtPlayheadRef = useRef(onLoopAtPlayhead)
   const ctxRef = useRef<AudioContext | null>(null)
   const pianoRef = useRef<Soundfont | null>(null)
@@ -327,6 +334,20 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return
 
+      const blockTransport =
+        !!midiLearnModeRef.current || !!keyboardTransportBlockedRef?.current
+      if (blockTransport) {
+        if (
+          e.code === 'Space' ||
+          e.code === 'ArrowLeft' ||
+          e.code === 'ArrowRight' ||
+          e.code === 'Home'
+        ) {
+          e.preventDefault()
+          return
+        }
+      }
+
       /* Transport: allow OS key-repeat so arrows scrub smoothly */
       if (e.code === 'ArrowLeft') {
         e.preventDefault()
@@ -370,7 +391,15 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [octaveShift, jumpToStart, nudgePlayhead, onUserNoteOff, onUserNoteOn, togglePlay])
+  }, [
+    keyboardTransportBlockedRef,
+    octaveShift,
+    jumpToStart,
+    nudgePlayhead,
+    onUserNoteOff,
+    onUserNoteOn,
+    togglePlay,
+  ])
 
   useEffect(() => {
     if (!navigator.requestMIDIAccess) {
@@ -398,8 +427,9 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
           bindingsRef.current = next
           setMidiHardwareBindings(next)
           setMidiLearnMode(null)
-          return
         }
+        /* While learning, never run transport / notes — e.g. Start/Stop must bind, not play */
+        return
       }
 
       const bind = bindingsRef.current

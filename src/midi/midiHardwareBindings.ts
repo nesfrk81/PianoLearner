@@ -6,6 +6,8 @@ export type MidiControlBinding = {
 export type MidiTriggerBinding =
   | { kind: 'cc'; channel: number; controller: number }
   | { kind: 'noteOn'; channel: number; note: number }
+  /** System realtime (1 byte), e.g. Start 0xfa, Continue 0xfb, Stop 0xfc */
+  | { kind: 'sysRealtime'; status: number }
   | null
 
 export type MidiHardwareBindings = {
@@ -79,8 +81,12 @@ export function matchesTrigger(
   b: MidiTriggerBinding,
   data: Uint8Array,
 ): boolean {
-  if (!b || data.length < 2) return false
+  if (!b || data.length < 1) return false
   const st = data[0]
+  if (b.kind === 'sysRealtime') {
+    return st === b.status
+  }
+  if (data.length < 2) return false
   const ch = st & 0x0f
   if (b.kind === 'cc' && (st & 0xf0) === 0xb0 && data.length >= 3) {
     return ch === b.channel && data[1] === b.controller
@@ -101,8 +107,12 @@ export function matchesHardwareButtonTrigger(
   b: MidiTriggerBinding,
   data: Uint8Array,
 ): boolean {
-  if (!b || data.length < 2) return false
+  if (!b || data.length < 1) return false
   const st = data[0]
+  if (b.kind === 'sysRealtime') {
+    return st === b.status
+  }
+  if (data.length < 2) return false
   const ch = st & 0x0f
   if (b.kind === 'cc' && (st & 0xf0) === 0xb0 && data.length >= 3) {
     if (ch !== b.channel || data[1] !== b.controller) return false
@@ -157,6 +167,21 @@ function learnTriggerField(
     if (mode === 'stop') return { ...current, stop: t }
     return { ...current, loopAtPlayhead: t }
   }
+  /* Start / Continue / Stop — many controllers send these as single-byte messages */
+  if (data.length >= 1) {
+    if (mode === 'play' && (st === 0xfa || st === 0xfb)) {
+      return {
+        ...current,
+        play: { kind: 'sysRealtime', status: st },
+      }
+    }
+    if (mode === 'stop' && st === 0xfc) {
+      return {
+        ...current,
+        stop: { kind: 'sysRealtime', status: st },
+      }
+    }
+  }
   return null
 }
 
@@ -194,7 +219,16 @@ export function describeBinding(b: MidiHardwareBindings): {
   const trig = (t: MidiTriggerBinding) => {
     if (!t) return '—'
     if (t.kind === 'cc') return `CC ch${t.channel + 1} #${t.controller}`
-    return `Note On ch${t.channel + 1} ${t.note}`
+    if (t.kind === 'noteOn') return `Note On ch${t.channel + 1} ${t.note}`
+    const label =
+      t.status === 0xfa
+        ? 'Start'
+        : t.status === 0xfb
+          ? 'Continue'
+          : t.status === 0xfc
+            ? 'Stop'
+            : 'Sys'
+    return `MIDI ${label} (0x${t.status.toString(16)})`
   }
   const knob = (k: MidiControlBinding) => {
     if (!k) return '—'

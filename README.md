@@ -1,73 +1,65 @@
-# React + TypeScript + Vite
+# Piano Learner
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Practice piano from **MIDI files**: staff + falling notes aligned with an on-screen keyboard, USB MIDI and QWERTY input, A/B loops, and optional practice modes.
 
-Currently, two official plugins are available:
+## Use it online (GitHub Pages)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+**Live app:** [https://nesfrk81.github.io/PianoLearner/](https://nesfrk81.github.io/PianoLearner/)
 
-## React Compiler
+1. **Open the link** in a desktop browser (Chrome or Edge work well for **Web MIDI**).
+2. **Enable sound** — click **“Tap to enable audio”** once. Browsers block audio until you interact with the page.
+3. **Wait** for the piano soundfont to finish loading (progress is shown briefly).
+4. **Load a MIDI file** — use **Open MIDI file** and pick a `.mid` / `.midi` from your computer.
+5. **Play** — use the **Play** / **Pause** button or press **Space**.
+6. **Settings** — click the **gear** (top right) to change practice track, mode, input latency, QWERTY octave, MIDI touch sensitivity, and **MIDI hardware** bindings.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Main controls
 
-## Expanding the ESLint configuration
+| Action | How |
+|--------|-----|
+| Play / pause | **Play** button or **Space** |
+| Seek | Click the **waterfall** (note lanes) |
+| Scrub time | **←** / **→** (±0.5 s) |
+| Jump to start | **Home** or **Jump to start** |
+| Loop a section | Click the **sheet** to set a ~1 s loop, drag the **blue handles**, or use a **learned** Record control (see Settings → MIDI hardware) |
+| Clear loop | **Clear loop**, **Esc**, or press the learned Record control again while looping |
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### USB MIDI keyboard
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- Connect the keyboard; the transport bar shows **MIDI:** plus your device name when Web MIDI is available.
+- Optional: **Settings → MIDI hardware** — map **Play**, **Stop**, **Record** (loop / toggle), and **loop start/end** knobs. Watch the **log** while pressing buttons; click **Learn**, then send the same message again to bind.
+- If **Play**/**Stop** are not mapped, standard **MIDI Start / Continue / Stop** messages still control playback.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### Practice modes (Settings)
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- **Listen** — hear the MIDI playback.
+- **Follow** / **Wait for notes** — use the app’s practice feedback (see the on-screen hints).
+
+### Installing as an app (optional)
+
+The site is a **PWA**; you can use the browser’s “Install” / “Add to desktop” option if you want a windowed shortcut.
+
+---
+
+## Run from source
+
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Open the URL Vite prints (usually `http://localhost:5173/`).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+For a production build:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run build
 ```
+
+`dist/` is what GitHub Actions deploys to Pages (see `.github/workflows/deploy-pages.yml`).
+
+---
+
+## Repository
+
+[https://github.com/nesfrk81/PianoLearner](https://github.com/nesfrk81/PianoLearner)

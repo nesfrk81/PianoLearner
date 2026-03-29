@@ -75,9 +75,12 @@ export default function App() {
   const [loopSheetOverlay, setLoopSheetOverlay] = useState(false)
   const closeLoopSheetOverlay = useCallback(() => setLoopSheetOverlay(false), [])
   const loopAtPlayheadFnRef = useRef<() => void>(() => {})
+  const keyboardTransportBlockedRef = useRef(false)
+  keyboardTransportBlockedRef.current = settingsOpen
   const pl = usePianoLearner({
     onLoopCleared: closeLoopSheetOverlay,
     onLoopAtPlayhead: () => loopAtPlayheadFnRef.current(),
+    keyboardTransportBlockedRef,
   })
 
   const {
