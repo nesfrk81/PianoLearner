@@ -30,7 +30,6 @@ import {
   loadPlaylistPersist,
   putMidiFile,
   savePlaylistPersist,
-  type StoredMidiRow,
 } from '../midi/midiPlaylistStorage'
 import { allNotesFlat, notesForTrack, trackSummaries } from '../midi/midiModel'
 import type { HandFilter, PracticeMode } from '../types'
