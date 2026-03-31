@@ -23,8 +23,17 @@ import {
   type MidiLearnMode,
 } from '../midi/midiHardwareBindings'
 import { formatMidiMessage, shouldLogMidiMessage } from '../midi/midiMonitorFormat'
+import {
+  deleteMidiFile,
+  getMidiFile,
+  listStoredMidiMeta,
+  loadPlaylistPersist,
+  putMidiFile,
+  savePlaylistPersist,
+  type StoredMidiRow,
+} from '../midi/midiPlaylistStorage'
 import { allNotesFlat, notesForTrack, trackSummaries } from '../midi/midiModel'
-import type { PracticeMode } from '../types'
+import type { HandFilter, PracticeMode } from '../types'
 import { midiForQwertyKey } from '../input/qwertyMap'
 
 /** Fixed wall-clock step for ←/→ (musical beat length varies with tempo and confuses scrubbing). */
@@ -60,6 +69,9 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
 
   const [midi, setMidi] = useState<Midi | null>(null)
   const [fileName, setFileName] = useState<string>('')
+  const [playlist, setPlaylist] = useState<{ id: string; name: string }[]>([])
+  const [currentPlaylistId, setCurrentPlaylistId] = useState<string | null>(null)
+  const [playlistHydrated, setPlaylistHydrated] = useState(false)
   const [selectedTrackIndex, setSelectedTrackIndex] = useState(0)
   const [soloTrack, setSoloTrack] = useState(true)
   const [mode, setMode] = useState<PracticeMode>('listen')
@@ -69,6 +81,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   const [octaveShift, setOctaveShift] = useState(0)
   /** Multiplier for USB MIDI note-on velocity (1 = as sent; higher = louder at same touch). */
   const [midiVelocitySensitivity, setMidiVelocitySensitivity] = useState(1.5)
+
+  const [handFilter, setHandFilter] = useState<HandFilter>('both')
 
   const [loopEnabled, setLoopEnabled] = useState(false)
   const [loopA, setLoopA] = useState(0)
@@ -88,6 +102,9 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   const loopARef = useRef(loopA)
   const loopBRef = useRef(loopB)
   const loopEnabledRef = useRef(loopEnabled)
+
+  /** Soft-takeover: knob is ignored until it crosses the current parameter value. */
+  const knobPickedUp = useRef({ loopStart: false, loopEnd: false, loopShift: false })
   useLayoutEffect(() => {
     onLoopAtPlayheadRef.current = onLoopAtPlayhead
     bindingsRef.current = midiHardwareBindings
@@ -109,6 +126,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   const [userPressedMidi, setUserPressedMidi] = useState<Set<number>>(
     () => new Set(),
   )
+  const [waitExpectedMidi, setWaitExpectedMidi] = useState<Set<number> | null>(null)
 
   const ensureAudio = useCallback(async () => {
     if (!ctxRef.current) {
@@ -139,26 +157,34 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
 
   const playbackNotes = useMemo(() => {
     if (!midi) return []
-    return soloTrack
+    const raw = soloTrack
       ? notesForTrack(midi, selectedTrackIndex)
       : allNotesFlat(midi)
-  }, [midi, selectedTrackIndex, soloTrack])
+    if (handFilter === 'both') return raw
+    return raw.filter((n) =>
+      handFilter === 'left' ? n.midi < splitMidi : n.midi >= splitMidi,
+    )
+  }, [midi, selectedTrackIndex, soloTrack, handFilter, splitMidi])
 
   const fingeringMap = useMemo(() => {
     if (!midi) return new Map<string, number>()
-    const notes = notesForTrack(midi, selectedTrackIndex)
+    let notes = notesForTrack(midi, selectedTrackIndex)
+    if (handFilter !== 'both') {
+      notes = notes.filter((n) =>
+        handFilter === 'left' ? n.midi < splitMidi : n.midi >= splitMidi,
+      )
+    }
     return computeFingeringMap(
       notes.map((n) => ({ time: n.time, midi: n.midi })),
       splitMidi,
     )
-  }, [midi, selectedTrackIndex, splitMidi])
+  }, [midi, selectedTrackIndex, splitMidi, handFilter])
 
-  const loadMidiFile = useCallback(
-    async (file: File) => {
+  const applyMidiFromBuffer = useCallback(
+    async (buf: ArrayBuffer, name: string) => {
       await ensureAudio()
-      const buf = await file.arrayBuffer()
       const m = new Midi(buf)
-      setFileName(file.name)
+      setFileName(name)
       setMidi(m)
       const summaries = trackSummaries(m)
       const firstWithNotes = summaries.find((s) => s.noteCount > 0)?.index ?? 0
@@ -177,10 +203,174 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         const dur = m.duration
         setLoopA(0)
         setLoopB(Math.min(8, dur || 8))
+        knobPickedUp.current = { loopStart: false, loopEnd: false, loopShift: false }
+        setWaitExpectedMidi(null)
       }
     },
     [ensureAudio, mode, soloTrack],
   )
+
+  const applyMidiFromBufferRef = useRef(applyMidiFromBuffer)
+  applyMidiFromBufferRef.current = applyMidiFromBuffer
+
+  const newMidiId = () =>
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+  /** Add one or more MIDI files to the cache and playlist; loads the last file added. */
+  const addMidiFiles = useCallback(
+    async (files: FileList | readonly File[]) => {
+      const list = Array.from(files).filter((f) => /\.(mid|midi)$/i.test(f.name))
+      if (list.length === 0) return
+      await ensureAudio()
+      let ids = [...loadPlaylistPersist().ids]
+      const appended: { id: string; name: string }[] = []
+      let lastId = ''
+      let lastBuf: ArrayBuffer | null = null
+      let lastName = ''
+      for (const file of list) {
+        const buf = await file.arrayBuffer()
+        const copy = buf.slice(0)
+        const id = newMidiId()
+        await putMidiFile({
+          id,
+          name: file.name,
+          addedAt: Date.now(),
+          buffer: copy,
+        })
+        ids.push(id)
+        appended.push({ id, name: file.name })
+        lastId = id
+        lastBuf = copy
+        lastName = file.name
+      }
+      savePlaylistPersist({ ids, currentId: lastId })
+      setPlaylist((prev) => [...prev, ...appended])
+      setCurrentPlaylistId(lastId)
+      if (lastBuf) await applyMidiFromBuffer(lastBuf, lastName)
+    },
+    [applyMidiFromBuffer, ensureAudio],
+  )
+
+  const selectPlaylistSong = useCallback(
+    async (id: string) => {
+      const row = await getMidiFile(id)
+      if (!row) return
+      savePlaylistPersist({ ...loadPlaylistPersist(), currentId: id })
+      setCurrentPlaylistId(id)
+      await applyMidiFromBuffer(row.buffer.slice(0), row.name)
+    },
+    [applyMidiFromBuffer],
+  )
+
+  const removePlaylistSong = useCallback(
+    async (id: string) => {
+      const persist = loadPlaylistPersist()
+      const oldIds = persist.ids
+      const idx = oldIds.indexOf(id)
+      const newIds = oldIds.filter((x) => x !== id)
+      await deleteMidiFile(id)
+      let newCurrent = persist.currentId
+      if (persist.currentId === id) {
+        if (newIds.length === 0) newCurrent = null
+        else {
+          const i = Math.min(Math.max(0, idx), newIds.length - 1)
+          newCurrent = newIds[i]!
+        }
+      }
+      savePlaylistPersist({ ids: newIds, currentId: newCurrent })
+      setPlaylist((prev) => prev.filter((p) => p.id !== id))
+      setCurrentPlaylistId(newCurrent)
+      if (persist.currentId === id) {
+        if (newCurrent) {
+          const row = await getMidiFile(newCurrent)
+          if (row) await applyMidiFromBuffer(row.buffer.slice(0), row.name)
+        } else {
+          await ensureAudio()
+          setMidi(null)
+          setFileName('')
+          setWaitExpectedMidi(null)
+          const ctl = controllerRef.current
+          if (ctl) {
+            ctl.setMidi(null)
+            ctl.pause()
+            ctl.seek(0)
+            setPlaying(false)
+            setSongTime(0)
+            setLoopA(0)
+            setLoopB(8)
+            ctl.loop = null
+          }
+        }
+      }
+    },
+    [applyMidiFromBuffer, ensureAudio],
+  )
+
+  const nextPlaylistSong = useCallback(async () => {
+    if (playlist.length === 0) return
+    const ids = playlist.map((p) => p.id)
+    const i = currentPlaylistId ? ids.indexOf(currentPlaylistId) : 0
+    const cur = i < 0 ? 0 : i
+    const nextIdx = (cur + 1) % ids.length
+    await selectPlaylistSong(ids[nextIdx]!)
+  }, [playlist, currentPlaylistId, selectPlaylistSong])
+
+  const previousPlaylistSong = useCallback(async () => {
+    if (playlist.length === 0) return
+    const ids = playlist.map((p) => p.id)
+    const i = currentPlaylistId ? ids.indexOf(currentPlaylistId) : 0
+    const cur = i < 0 ? 0 : i
+    const prevIdx = (cur - 1 + ids.length) % ids.length
+    await selectPlaylistSong(ids[prevIdx]!)
+  }, [playlist, currentPlaylistId, selectPlaylistSong])
+
+  const nextPlaylistSongRef = useRef(nextPlaylistSong)
+  const prevPlaylistSongRef = useRef(previousPlaylistSong)
+  nextPlaylistSongRef.current = nextPlaylistSong
+  prevPlaylistSongRef.current = previousPlaylistSong
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const persist = loadPlaylistPersist()
+        const metas = await listStoredMidiMeta()
+        const metaById = new Map(metas.map((m) => [m.id, m]))
+        let ids = persist.ids.filter((id) => metaById.has(id))
+        if (ids.length === 0 && metas.length > 0) {
+          ids = [...metas]
+            .sort((a, b) => a.addedAt - b.addedAt)
+            .map((m) => m.id)
+        }
+        let currentId =
+          persist.currentId && ids.includes(persist.currentId)
+            ? persist.currentId
+            : ids[0] ?? null
+        savePlaylistPersist({ ids, currentId })
+        const pl = ids.map((id) => ({
+          id,
+          name: metaById.get(id)!.name,
+        }))
+        if (cancelled) return
+        setPlaylist(pl)
+        setCurrentPlaylistId(currentId)
+        if (currentId) {
+          const row = await getMidiFile(currentId)
+          if (row && !cancelled) {
+            await applyMidiFromBufferRef.current(row.buffer.slice(0), row.name)
+          }
+        }
+      } catch {
+        /* IndexedDB unavailable or corrupt — still show UI */
+      }
+      if (!cancelled) setPlaylistHydrated(true)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const ctl = controllerRef.current
@@ -192,8 +382,17 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     const ctl = controllerRef.current
     if (!ctl) return
     ctl.mode = mode
-    if (mode !== 'wait') ctl.resetWaitState()
+    if (mode !== 'wait') {
+      ctl.resetWaitState()
+      setWaitExpectedMidi(null)
+    }
   }, [mode])
+
+  useEffect(() => {
+    const ctl = controllerRef.current
+    if (!ctl) return
+    ctl.setHandFilter(handFilter, splitMidi)
+  }, [handFilter, splitMidi])
 
   useEffect(() => {
     const ctl = controllerRef.current
@@ -210,6 +409,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       ctl.pause()
       setPlaying(false)
       setSongTime(ctl.getSongTime())
+      setWaitExpectedMidi(null)
     } else {
       ctl.start()
       setPlaying(true)
@@ -223,6 +423,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     ctl.pause()
     setPlaying(false)
     setSongTime(ctl.getSongTime())
+    setWaitExpectedMidi(null)
   }, [])
 
   const seek = useCallback((t: number) => {
@@ -230,8 +431,10 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     if (ctl) {
       ctl.seek(t)
       setSongTime(ctl.getSongTime())
+      setWaitExpectedMidi(ctl.getWaitExpectedMidi())
     } else {
       setSongTime(t)
+      setWaitExpectedMidi(null)
     }
   }, [])
 
@@ -254,8 +457,20 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
 
   const clearLoop = useCallback(() => {
     setLoopEnabled(false)
+    knobPickedUp.current = { loopStart: false, loopEnd: false, loopShift: false }
     onLoopCleared?.()
   }, [onLoopCleared])
+
+  const MODES: PracticeMode[] = ['listen', 'follow', 'wait']
+  const HANDS: HandFilter[] = ['both', 'right', 'left']
+
+  const cycleMode = useCallback(() => {
+    setMode((prev) => MODES[(MODES.indexOf(prev) + 1) % MODES.length]!)
+  }, [])
+
+  const cycleHand = useCallback(() => {
+    setHandFilter((prev) => HANDS[(HANDS.indexOf(prev) + 1) % HANDS.length]!)
+  }, [])
 
   useEffect(() => {
     saveMidiHardwareBindings(midiHardwareBindings)
@@ -274,6 +489,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       if (ctl?.playing) {
         ctl.tick()
         setSongTime(ctl.getSongTime())
+        setWaitExpectedMidi(ctl.getWaitExpectedMidi())
       }
       rafRef.current = requestAnimationFrame(loop)
     }
@@ -442,6 +658,26 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         void togglePlay()
         return
       }
+      if (bind.jumpToStart && matchesHardwareButtonTrigger(bind.jumpToStart, data)) {
+        jumpToStart()
+        return
+      }
+      if (bind.cycleMode && matchesHardwareButtonTrigger(bind.cycleMode, data)) {
+        cycleMode()
+        return
+      }
+      if (bind.cycleHand && matchesHardwareButtonTrigger(bind.cycleHand, data)) {
+        cycleHand()
+        return
+      }
+      if (bind.nextSong && matchesHardwareButtonTrigger(bind.nextSong, data)) {
+        void nextPlaylistSongRef.current()
+        return
+      }
+      if (bind.previousSong && matchesHardwareButtonTrigger(bind.previousSong, data)) {
+        void prevPlaylistSongRef.current()
+        return
+      }
 
       const loopTrig = bind.loopAtPlayhead
       if (loopTrig && matchesHardwareButtonTrigger(loopTrig, data)) {
@@ -465,17 +701,50 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       const d = midi?.duration ?? 0
       if (d > 0 && (st & 0xf0) === 0xb0 && data.length >= 3) {
         const v = data[2] ?? 0
-        const t = (v / 127) * d
+        const pu = knobPickedUp.current
+        const PICKUP_THRESH = 3
+
         if (bind.loopStartKnob && matchesCcControl(bind.loopStartKnob, data)) {
+          const currentCc = Math.round((loopARef.current / d) * 127)
+          if (!pu.loopStart) {
+            if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopStart = true
+            else return
+          }
+          const t = (v / 127) * d
           setLoopEnabled(true)
           const b = loopBRef.current
           setLoopA(Math.max(0, Math.min(t, b - 0.05)))
           return
         }
         if (bind.loopEndKnob && matchesCcControl(bind.loopEndKnob, data)) {
+          const currentCc = Math.round((loopBRef.current / d) * 127)
+          if (!pu.loopEnd) {
+            if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopEnd = true
+            else return
+          }
+          const t = (v / 127) * d
           setLoopEnabled(true)
           const a = loopARef.current
           setLoopB(Math.max(a + 0.05, Math.min(d, t)))
+          return
+        }
+        if (bind.loopShiftKnob && matchesCcControl(bind.loopShiftKnob, data)) {
+          const a = loopARef.current
+          const b = loopBRef.current
+          const span = b - a
+          if (span < 0.05) return
+          const center = (a + span / 2) / d
+          const currentCc = Math.round(center * 127)
+          if (!pu.loopShift) {
+            if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopShift = true
+            else return
+          }
+          setLoopEnabled(true)
+          const maxStart = d - span
+          const newA = Math.max(0, Math.min(maxStart, (v / 127) * d - span / 2))
+          const newB = newA + span
+          setLoopA(newA)
+          setLoopB(Math.min(d, newB))
           return
         }
       }
@@ -526,6 +795,9 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     }
   }, [
     clearLoop,
+    cycleHand,
+    cycleMode,
+    jumpToStart,
     midi,
     onUserNoteOn,
     onUserNoteOff,
@@ -570,9 +842,17 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     setOctaveShift,
     midiVelocitySensitivity,
     setMidiVelocitySensitivity,
-    loadMidiFile,
+    addMidiFiles,
+    playlist,
+    currentPlaylistId,
+    playlistHydrated,
+    selectPlaylistSong,
+    removePlaylistSong,
+    handFilter,
+    setHandFilter,
     fingeringMap,
     userPressedMidi,
+    waitExpectedMidi,
     controllerRef,
     midiConnected,
     playbackNotes,
@@ -584,6 +864,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     setLoopB,
     nudgePlayhead,
     jumpToStart,
+    nextPlaylistSong,
+    previousPlaylistSong,
     clearLoop,
     midiHardwareBindings,
     setMidiHardwareBindings,

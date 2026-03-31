@@ -69,9 +69,152 @@ function CogIcon() {
   )
 }
 
+function PlaylistIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M8 6h13M8 12h13M8 18h13M5 6h.01M5 12h.01M5 18h.01" />
+    </svg>
+  )
+}
+
+function PlusIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+const I = { w: 18, h: 18, vb: '0 0 24 24' } as const
+function Ico({ d, ...rest }: { d: string } & React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={I.w} height={I.h} viewBox={I.vb}
+      fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden {...rest}>
+      <path d={d} />
+    </svg>
+  )
+}
+
+function IconHeadphones() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={I.w} height={I.h} viewBox={I.vb}
+      fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M3 18v-6a9 9 0 0118 0v6" />
+      <path d="M21 19a2 2 0 01-2 2h-1a2 2 0 01-2-2v-3a2 2 0 012-2h3v5zM3 19a2 2 0 002 2h1a2 2 0 002-2v-3a2 2 0 00-2-2H3v5z" />
+    </svg>
+  )
+}
+
+function IconFollow() {
+  return <Ico d="M9 18V5l12-2v13M9 18a3 3 0 11-6 0 3 3 0 016 0zm12-2a3 3 0 11-6 0 3 3 0 016 0z" />
+}
+
+function IconWait() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={I.w} height={I.h} viewBox={I.vb}
+      fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+    </svg>
+  )
+}
+
+function IconBothHands() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={I.w} height={I.h} viewBox={I.vb}
+      fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M18 11V6a2 2 0 10-4 0v4M14 10V4a2 2 0 10-4 0v6M10 10V6a2 2 0 10-4 0v8l-1.46-1.46a2 2 0 00-2.83 2.83L6 20h12l1.46-4.39A2 2 0 0018 14v-3z" />
+    </svg>
+  )
+}
+
+function IconLeftHand() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={I.w} height={I.h} viewBox={I.vb}
+      fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M18 11V6a2 2 0 10-4 0v4M14 10V4a2 2 0 10-4 0v6M10 10V6a2 2 0 10-4 0v8l-1.46-1.46a2 2 0 00-2.83 2.83L6 20h12l1.46-4.39A2 2 0 0018 14v-3z" />
+      <line x1="2" y1="2" x2="12" y2="2" strokeWidth="3" />
+    </svg>
+  )
+}
+
+function IconRightHand() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={I.w} height={I.h} viewBox={I.vb}
+      fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M18 11V6a2 2 0 10-4 0v4M14 10V4a2 2 0 10-4 0v6M10 10V6a2 2 0 10-4 0v8l-1.46-1.46a2 2 0 00-2.83 2.83L6 20h12l1.46-4.39A2 2 0 0018 14v-3z" />
+      <line x1="12" y1="2" x2="22" y2="2" strokeWidth="3" />
+    </svg>
+  )
+}
+
+type SegBtnItem<T extends string> = { value: T; label: string; icon: React.ReactNode }
+
+function SegmentedBar<T extends string>({
+  items,
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  items: SegBtnItem<T>[]
+  value: T
+  onChange: (v: T) => void
+  ariaLabel: string
+}) {
+  return (
+    <div className="seg-bar" role="radiogroup" aria-label={ariaLabel}>
+      {items.map((it) => (
+        <button
+          key={it.value}
+          type="button"
+          role="radio"
+          aria-checked={value === it.value}
+          className={'seg-btn' + (value === it.value ? ' seg-btn--on' : '')}
+          onClick={() => onChange(it.value)}
+          title={it.label}
+        >
+          {it.icon}
+          <span className="seg-label">{it.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export default function App() {
   const [latencyMs, setLatencyMs] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [playlistOpen, setPlaylistOpen] = useState(false)
+  const playlistPopoverRef = useRef<HTMLDivElement>(null)
+  const midiAddInputRef = useRef<HTMLInputElement>(null)
   const [loopSheetOverlay, setLoopSheetOverlay] = useState(false)
   const closeLoopSheetOverlay = useCallback(() => setLoopSheetOverlay(false), [])
   const loopAtPlayheadFnRef = useRef<() => void>(() => {})
@@ -102,15 +245,25 @@ export default function App() {
     songTime,
     seek,
     jumpToStart,
+    handFilter,
+    setHandFilter,
     splitMidi,
     setSplitMidi,
     octaveShift,
     setOctaveShift,
     midiVelocitySensitivity,
     setMidiVelocitySensitivity,
-    loadMidiFile,
+    addMidiFiles,
+    playlist,
+    currentPlaylistId,
+    playlistHydrated,
+    selectPlaylistSong,
+    removePlaylistSong,
+    nextPlaylistSong,
+    previousPlaylistSong,
     fingeringMap,
     userPressedMidi,
+    waitExpectedMidi,
     midiConnected,
     playbackNotes,
     loopEnabled,
@@ -147,8 +300,8 @@ export default function App() {
 
   const expectedMidi = useMemo(
     () =>
-      expectedMidiNow(playbackNotes, songTime - latencyMs / 1000),
-    [playbackNotes, songTime, latencyMs],
+      waitExpectedMidi ?? expectedMidiNow(playbackNotes, songTime - latencyMs / 1000),
+    [waitExpectedMidi, playbackNotes, songTime, latencyMs],
   )
 
   const duration = midi?.duration ?? 0
@@ -186,6 +339,11 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code !== 'Escape') return
+      if (playlistOpen) {
+        e.preventDefault()
+        setPlaylistOpen(false)
+        return
+      }
       if (settingsOpen) {
         e.preventDefault()
         setSettingsOpen(false)
@@ -204,7 +362,17 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [midi, clearLoop, settingsOpen])
+  }, [midi, clearLoop, settingsOpen, playlistOpen])
+
+  useEffect(() => {
+    if (!playlistOpen) return
+    const onDown = (ev: MouseEvent) => {
+      const el = playlistPopoverRef.current
+      if (el && !el.contains(ev.target as Node)) setPlaylistOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [playlistOpen])
 
   return (
     <div className="app">
@@ -218,15 +386,145 @@ export default function App() {
           </p>
         </div>
         {audioReady && (
-          <button
-            type="button"
-            className="btn-icon app-settings-cog"
-            onClick={() => setSettingsOpen(true)}
-            title="Settings"
-            aria-label="Open settings"
-          >
-            <CogIcon />
-          </button>
+          <div className="app-header-actions">
+            <div className="playlist-anchor" ref={playlistPopoverRef}>
+              <input
+                ref={midiAddInputRef}
+                type="file"
+                className="playlist-file-input-hidden"
+                accept=".mid,.midi,audio/midi"
+                multiple
+                tabIndex={-1}
+                aria-hidden
+                onChange={(e) => {
+                  const files = e.target.files
+                  if (files?.length) void addMidiFiles(files)
+                  e.target.value = ''
+                }}
+              />
+              <button
+                type="button"
+                className={
+                  'btn-icon playlist-toggle' +
+                  (playlistOpen ? ' playlist-toggle--open' : '')
+                }
+                onClick={() => setPlaylistOpen((o) => !o)}
+                title="Playlist — add songs with + inside"
+                aria-expanded={playlistOpen}
+                aria-haspopup="dialog"
+                aria-label="Playlist"
+              >
+                <PlaylistIcon />
+                {playlistHydrated && playlist.length > 0 ? (
+                  <span className="playlist-toggle-badge" aria-hidden>
+                    {playlist.length}
+                  </span>
+                ) : null}
+              </button>
+              {playlistOpen && playlistHydrated && (
+                <div
+                  className="playlist-popover"
+                  role="dialog"
+                  aria-label="MIDI playlist"
+                >
+                  <div className="playlist-popover-head">
+                    <span className="playlist-title">Playlist</span>
+                    <div className="playlist-popover-actions">
+                      {playlist.length > 0 ? (
+                        <div className="playlist-step">
+                          <button
+                            type="button"
+                            className="btn small"
+                            onClick={() => void previousPlaylistSong()}
+                            title="Previous song (wraps)"
+                          >
+                            Previous
+                          </button>
+                          <button
+                            type="button"
+                            className="btn small"
+                            onClick={() => void nextPlaylistSong()}
+                            title="Next song (wraps)"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="btn-icon playlist-add-btn"
+                        onClick={() => midiAddInputRef.current?.click()}
+                        title="Add MIDI files (multi-select)"
+                        aria-label="Add MIDI files to playlist"
+                      >
+                        <PlusIcon />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="playlist-add-desc">
+                    Tap <strong className="playlist-plus-mark">+</strong> to
+                    choose one or more .mid / .midi files. They are saved here and
+                    listed below; the last file in each batch becomes the current
+                    song.
+                  </p>
+                  {playlist.length > 0 ? (
+                    <ul className="playlist-list">
+                      {playlist.map((p) => (
+                        <li
+                          key={p.id}
+                          className={
+                            'playlist-item' +
+                            (p.id === currentPlaylistId
+                              ? ' playlist-item--current'
+                              : '')
+                          }
+                        >
+                          <button
+                            type="button"
+                            className="playlist-select"
+                            onClick={() => {
+                              void selectPlaylistSong(p.id)
+                              setPlaylistOpen(false)
+                            }}
+                            title="Load this song"
+                          >
+                            {p.name}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn small playlist-remove"
+                            onClick={() => void removePlaylistSong(p.id)}
+                            title="Remove from playlist"
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="playlist-popover-empty muted">
+                      No songs yet. Tap + above to add files.
+                    </p>
+                  )}
+                  <p className="muted playlist-hint">
+                    Stored in this browser (IndexedDB). Same device only.
+                  </p>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="btn-icon app-settings-cog"
+              onClick={() => {
+                setPlaylistOpen(false)
+                setSettingsOpen(true)
+              }}
+              title="Settings"
+              aria-label="Open settings"
+            >
+              <CogIcon />
+            </button>
+          </div>
         )}
       </header>
 
@@ -249,24 +547,28 @@ export default function App() {
         </p>
       )}
 
-      <section className="panel">
-        <label className="file-label">
-          <span>Open MIDI file</span>
-          <input
-            type="file"
-            accept=".mid,.midi,audio/midi"
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) void loadMidiFile(f)
-            }}
-          />
-        </label>
-        {fileName ? (
-          <span className="file-name">{fileName}</span>
-        ) : (
-          <span className="muted">No file loaded</span>
-        )}
-      </section>
+      {!playlistHydrated ? (
+        <section className="panel panel-midi-files">
+          <span className="muted">Loading cached songs…</span>
+        </section>
+      ) : playlist.length === 0 ? (
+        <section className="start-playlist-hero" aria-labelledby="start-playlist-heading">
+          <h2 id="start-playlist-heading" className="start-playlist-title">
+            Create midi playlist
+          </h2>
+          <p className="start-playlist-body">
+            Open the <strong>playlist</strong> using the list icon in the top
+            corner (left of settings). Tap the <strong>+</strong> button there to
+            add MIDI files — you can pick several at once. Songs stay in this
+            browser only.
+          </p>
+        </section>
+      ) : (
+        <section className="panel panel-midi-files panel-now-playing">
+          <span className="now-playing-label">Now playing</span>
+          <span className="file-name">{fileName || '—'}</span>
+        </section>
+      )}
 
       {audioReady && (
         <SettingsModal
@@ -345,19 +647,6 @@ export default function App() {
                   Solo this track
                 </label>
                 <label>
-                  Mode
-                  <select
-                    value={mode}
-                    onChange={(e) =>
-                      setMode(e.target.value as 'listen' | 'follow' | 'wait')
-                    }
-                  >
-                    <option value="listen">Listen</option>
-                    <option value="follow">Follow</option>
-                    <option value="wait">Wait for notes</option>
-                  </select>
-                </label>
-                <label>
                   Hand split (sheet + fingering)
                   <input
                     type="number"
@@ -424,6 +713,29 @@ export default function App() {
             )}
           </section>
 
+          <div className="practice-bars">
+            <SegmentedBar
+              ariaLabel="Practice mode"
+              value={mode}
+              onChange={setMode}
+              items={[
+                { value: 'listen' as const, label: 'Listen', icon: <IconHeadphones /> },
+                { value: 'follow' as const, label: 'Follow', icon: <IconFollow /> },
+                { value: 'wait' as const, label: 'Wait', icon: <IconWait /> },
+              ]}
+            />
+            <SegmentedBar
+              ariaLabel="Practice hand"
+              value={handFilter}
+              onChange={setHandFilter}
+              items={[
+                { value: 'left' as const, label: 'L', icon: <IconLeftHand /> },
+                { value: 'both' as const, label: 'Both', icon: <IconBothHands /> },
+                { value: 'right' as const, label: 'R', icon: <IconRightHand /> },
+              ]}
+            />
+          </div>
+
           <section className="sheet-section">
             <MusicTimeline
               notes={playbackNotes}
@@ -446,9 +758,10 @@ export default function App() {
               onCloseLoopSheetOverlay={closeLoopSheetOverlay}
             />
             <p className="hint timeline-hint">
-              Orange on the staff = playing now. Click the staff to choose a 1s
-              loop (drag the blue bars), Done or Esc to close. Orange blocks fall
-              to the red line — play as they arrive. Click the waterfall to seek.
+              Orange = expected notes. Purple = your key press. Green = correct
+              hit. Click the staff to set a loop (drag the blue bars), Done or
+              Esc to close. Orange blocks fall to the red line — play as
+              they arrive. Click the waterfall to seek.
             </p>
           </section>
         </>

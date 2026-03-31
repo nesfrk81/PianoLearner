@@ -70,6 +70,66 @@ export function MidiMappingPanel({
           </button>
         </div>
         <div className="midi-mapping-row">
+          <span className="midi-mapping-label">Jump to start</span>
+          <code className="midi-mapping-value">{d.jumpToStart}</code>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!midiConnected}
+            onClick={() => toggle('jumpToStart')}
+          >
+            {learnMode === 'jumpToStart' ? 'Listening…' : 'Learn'}
+          </button>
+        </div>
+        <div className="midi-mapping-row">
+          <span className="midi-mapping-label">Cycle mode (listen / follow / wait)</span>
+          <code className="midi-mapping-value">{d.cycleMode}</code>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!midiConnected}
+            onClick={() => toggle('cycleMode')}
+          >
+            {learnMode === 'cycleMode' ? 'Listening…' : 'Learn'}
+          </button>
+        </div>
+        <div className="midi-mapping-row">
+          <span className="midi-mapping-label">Cycle hand (both / right / left)</span>
+          <code className="midi-mapping-value">{d.cycleHand}</code>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!midiConnected}
+            onClick={() => toggle('cycleHand')}
+          >
+            {learnMode === 'cycleHand' ? 'Listening…' : 'Learn'}
+          </button>
+        </div>
+        <div className="midi-mapping-row">
+          <span className="midi-mapping-label">Next song (playlist)</span>
+          <code className="midi-mapping-value">{d.nextSong}</code>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!midiConnected}
+            onClick={() => toggle('nextSong')}
+          >
+            {learnMode === 'nextSong' ? 'Listening…' : 'Learn'}
+          </button>
+        </div>
+        <div className="midi-mapping-row">
+          <span className="midi-mapping-label">Previous song (playlist)</span>
+          <code className="midi-mapping-value">{d.previousSong}</code>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!midiConnected}
+            onClick={() => toggle('previousSong')}
+          >
+            {learnMode === 'previousSong' ? 'Listening…' : 'Learn'}
+          </button>
+        </div>
+        <div className="midi-mapping-row">
           <span className="midi-mapping-label">
             Record — loop at playhead / toggle off
           </span>
@@ -105,6 +165,18 @@ export function MidiMappingPanel({
             onClick={() => toggle('loopB')}
           >
             {learnMode === 'loopB' ? 'Listening…' : 'Learn'}
+          </button>
+        </div>
+        <div className="midi-mapping-row">
+          <span className="midi-mapping-label">Loop shift (slide region)</span>
+          <code className="midi-mapping-value">{d.loopShiftKnob}</code>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!midiConnected}
+            onClick={() => toggle('loopShift')}
+          >
+            {learnMode === 'loopShift' ? 'Listening…' : 'Learn'}
           </button>
         </div>
       </div>

@@ -15,26 +15,44 @@ export type MidiHardwareBindings = {
   play: MidiTriggerBinding
   /** Pause playback only — learned button or note. */
   stop: MidiTriggerBinding
+  /** Jump to start (Home). */
+  jumpToStart: MidiTriggerBinding
+  /** Cycle practice mode: listen → follow → wait → listen. */
+  cycleMode: MidiTriggerBinding
+  /** Cycle practice hand: both → right → left → both. */
+  cycleHand: MidiTriggerBinding
   /** Record: loop at playhead; press again to clear loop. */
   loopAtPlayhead: MidiTriggerBinding
   /** Knob → loop start (left bar), absolute 0–127 → timeline. */
   loopStartKnob: MidiControlBinding
   /** Knob → loop end (right bar). */
   loopEndKnob: MidiControlBinding
+  /** Knob → slide the entire loop region across the timeline (0–127). */
+  loopShiftKnob: MidiControlBinding
+  /** Next song in playlist (wraps). */
+  nextSong: MidiTriggerBinding
+  /** Previous song in playlist (wraps). */
+  previousSong: MidiTriggerBinding
 }
 
 export const defaultMidiHardwareBindings: MidiHardwareBindings = {
   play: null,
   stop: null,
+  jumpToStart: null,
+  cycleMode: null,
+  cycleHand: null,
   loopAtPlayhead: null,
   loopStartKnob: null,
   loopEndKnob: null,
+  loopShiftKnob: null,
+  nextSong: null,
+  previousSong: null,
 }
 
 const STORAGE_KEY_V2 = 'piano-learner-midi-bindings-v2'
 const STORAGE_KEY_V1 = 'piano-learner-midi-bindings-v1'
 
-export type MidiLearnMode = 'play' | 'stop' | 'playhead' | 'loopA' | 'loopB'
+export type MidiLearnMode = 'play' | 'stop' | 'jumpToStart' | 'cycleMode' | 'cycleHand' | 'playhead' | 'loopA' | 'loopB' | 'loopShift' | 'nextSong' | 'previousSong'
 
 function normalizeBindings(
   o: Partial<MidiHardwareBindings>,
@@ -42,9 +60,15 @@ function normalizeBindings(
   return {
     play: o.play ?? null,
     stop: o.stop ?? null,
+    jumpToStart: o.jumpToStart ?? null,
+    cycleMode: o.cycleMode ?? null,
+    cycleHand: o.cycleHand ?? null,
     loopAtPlayhead: o.loopAtPlayhead ?? null,
     loopStartKnob: o.loopStartKnob ?? null,
     loopEndKnob: o.loopEndKnob ?? null,
+    loopShiftKnob: o.loopShiftKnob ?? null,
+    nextSong: o.nextSong ?? null,
+    previousSong: o.previousSong ?? null,
   }
 }
 
@@ -140,46 +164,49 @@ export function matchesCcControl(
   )
 }
 
+type TriggerLearnMode =
+  | 'play'
+  | 'stop'
+  | 'jumpToStart'
+  | 'cycleMode'
+  | 'cycleHand'
+  | 'playhead'
+  | 'nextSong'
+  | 'previousSong'
+
+const triggerFieldMap: Record<TriggerLearnMode, keyof MidiHardwareBindings> = {
+  play: 'play',
+  stop: 'stop',
+  jumpToStart: 'jumpToStart',
+  cycleMode: 'cycleMode',
+  cycleHand: 'cycleHand',
+  playhead: 'loopAtPlayhead',
+  nextSong: 'nextSong',
+  previousSong: 'previousSong',
+}
+
 function learnTriggerField(
-  mode: 'play' | 'stop' | 'playhead',
+  mode: TriggerLearnMode,
   data: Uint8Array,
   current: MidiHardwareBindings,
 ): MidiHardwareBindings | null {
+  const field = triggerFieldMap[mode]
   const st = data[0]
   const ch = st & 0x0f
   if ((st & 0xf0) === 0xb0 && data.length >= 3) {
-    const t = {
-      kind: 'cc' as const,
-      channel: ch,
-      controller: data[1],
-    }
-    if (mode === 'play') return { ...current, play: t }
-    if (mode === 'stop') return { ...current, stop: t }
-    return { ...current, loopAtPlayhead: t }
+    const t: MidiTriggerBinding = { kind: 'cc', channel: ch, controller: data[1] }
+    return { ...current, [field]: t }
   }
   if ((st & 0xf0) === 0x90 && data.length >= 3 && data[2] > 0) {
-    const t = {
-      kind: 'noteOn' as const,
-      channel: ch,
-      note: data[1],
-    }
-    if (mode === 'play') return { ...current, play: t }
-    if (mode === 'stop') return { ...current, stop: t }
-    return { ...current, loopAtPlayhead: t }
+    const t: MidiTriggerBinding = { kind: 'noteOn', channel: ch, note: data[1] }
+    return { ...current, [field]: t }
   }
-  /* Start / Continue / Stop — many controllers send these as single-byte messages */
   if (data.length >= 1) {
     if (mode === 'play' && (st === 0xfa || st === 0xfb)) {
-      return {
-        ...current,
-        play: { kind: 'sysRealtime', status: st },
-      }
+      return { ...current, play: { kind: 'sysRealtime', status: st } }
     }
     if (mode === 'stop' && st === 0xfc) {
-      return {
-        ...current,
-        stop: { kind: 'sysRealtime', status: st },
-      }
+      return { ...current, stop: { kind: 'sysRealtime', status: st } }
     }
   }
   return null
@@ -191,18 +218,17 @@ export function learnFromMessage(
   data: Uint8Array,
   current: MidiHardwareBindings,
 ): MidiHardwareBindings | null {
-  if (mode === 'play' || mode === 'stop' || mode === 'playhead') {
-    return learnTriggerField(mode, data, current)
+  if (mode in triggerFieldMap) {
+    return learnTriggerField(mode as TriggerLearnMode, data, current)
   }
   const st = data[0]
   const ch = st & 0x0f
-  if (mode === 'loopA' || mode === 'loopB') {
+  if (mode === 'loopA' || mode === 'loopB' || mode === 'loopShift') {
     if ((st & 0xf0) === 0xb0 && data.length >= 3) {
       const knob = { channel: ch, controller: data[1] }
-      if (mode === 'loopA') {
-        return { ...current, loopStartKnob: knob }
-      }
-      return { ...current, loopEndKnob: knob }
+      if (mode === 'loopA') return { ...current, loopStartKnob: knob }
+      if (mode === 'loopB') return { ...current, loopEndKnob: knob }
+      return { ...current, loopShiftKnob: knob }
     }
     return null
   }
@@ -212,9 +238,15 @@ export function learnFromMessage(
 export function describeBinding(b: MidiHardwareBindings): {
   play: string
   stop: string
+  jumpToStart: string
+  cycleMode: string
+  cycleHand: string
   loopAtPlayhead: string
   loopStartKnob: string
   loopEndKnob: string
+  loopShiftKnob: string
+  nextSong: string
+  previousSong: string
 } {
   const trig = (t: MidiTriggerBinding) => {
     if (!t) return '—'
@@ -237,8 +269,14 @@ export function describeBinding(b: MidiHardwareBindings): {
   return {
     play: trig(b.play),
     stop: trig(b.stop),
+    jumpToStart: trig(b.jumpToStart),
+    cycleMode: trig(b.cycleMode),
+    cycleHand: trig(b.cycleHand),
     loopAtPlayhead: trig(b.loopAtPlayhead),
     loopStartKnob: knob(b.loopStartKnob),
     loopEndKnob: knob(b.loopEndKnob),
+    loopShiftKnob: knob(b.loopShiftKnob),
+    nextSong: trig(b.nextSong),
+    previousSong: trig(b.previousSong),
   }
 }

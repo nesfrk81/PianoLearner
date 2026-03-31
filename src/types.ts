@@ -1,5 +1,7 @@
 export type PracticeMode = 'listen' | 'follow' | 'wait'
 
+export type HandFilter = 'both' | 'left' | 'right'
+
 export type LoopSnap = 'off' | 'beat' | 'bar'
 
 export interface LoopRegion {

@@ -12,8 +12,8 @@ dist
 dist-ssr
 *.local
 
-# Local MIDI test files (add your own; do not commit copyrighted MIDIs)
-Midi/
+# Local MIDI test files at repo root only (add your own; do not commit copyrighted MIDIs)
+/Midi/
 
 # Editor directories and files
 .vscode/*

@@ -1,7 +1,7 @@
 import type { Midi } from '@tonejs/midi'
 import type { Soundfont } from 'smplr'
 import { allNotesFlat, notesForTrack } from '../midi/midiModel'
-import type { NoteView } from '../types'
+import type { NoteView, HandFilter } from '../types'
 import type { PracticeMode } from '../types'
 import { groupNotesByOnset, type OnsetGroup } from './onsetGroups'
 
@@ -13,6 +13,8 @@ export class PlaybackController {
   selectedTrackIndex = 0
   soloTrack = true
   mode: PracticeMode = 'listen'
+  handFilter: HandFilter = 'both'
+  splitMidi = 60
   playing = false
 
   private anchorAudio = 0
@@ -24,6 +26,7 @@ export class PlaybackController {
   private waitCursor = 0
   waiting = false
   private waitHits = new Set<number>()
+  private practiceNoteIds = new Set<string>()
 
   loop: { a: number; b: number } | null = null
 
@@ -50,6 +53,13 @@ export class PlaybackController {
     if (this.waitCursor < 0) this.waitCursor = this.onsetGroups.length
   }
 
+  setHandFilter(filter: HandFilter, split: number): void {
+    this.handFilter = filter
+    this.splitMidi = split
+    this.rebuildOnsets()
+    this.scheduled.clear()
+  }
+
   resetWaitState(): void {
     this.waiting = false
     this.waitHits.clear()
@@ -58,21 +68,36 @@ export class PlaybackController {
     }
   }
 
+  private filterByHand(notes: NoteView[]): NoteView[] {
+    if (this.handFilter === 'both') return notes
+    return notes.filter((n) =>
+      this.handFilter === 'left' ? n.midi < this.splitMidi : n.midi >= this.splitMidi,
+    )
+  }
+
   rebuildOnsets(): void {
     if (!this.midi || !this.midi.tracks[this.selectedTrackIndex]) {
       this.onsetGroups = []
+      this.practiceNoteIds = new Set()
       return
     }
-    const notes = notesForTrack(this.midi, this.selectedTrackIndex)
+    const raw = notesForTrack(this.midi, this.selectedTrackIndex)
+    this.practiceNoteIds = new Set(raw.map((n) => n.id))
+    const notes = this.filterByHand(raw)
     this.onsetGroups = groupNotesByOnset(notes)
   }
 
   getPlaybackNotes(): NoteView[] {
     if (!this.midi) return []
-    if (this.soloTrack) {
-      return notesForTrack(this.midi, this.selectedTrackIndex)
-    }
-    return allNotesFlat(this.midi)
+    const raw = this.soloTrack
+      ? notesForTrack(this.midi, this.selectedTrackIndex)
+      : allNotesFlat(this.midi)
+    return this.filterByHand(raw)
+  }
+
+  private getAccompanimentNotes(): NoteView[] {
+    if (!this.midi) return []
+    return allNotesFlat(this.midi).filter((n) => !this.practiceNoteIds.has(n.id))
   }
 
   getSongTime(): number {
@@ -135,6 +160,12 @@ export class PlaybackController {
 
     if (this.mode === 'wait') {
       this.tickWaitMode(piano, songTime)
+      return
+    }
+
+    if (this.mode === 'follow') {
+      const acc = this.getAccompanimentNotes()
+      if (acc.length > 0) this.scheduleNotes(piano, songTime, undefined, acc)
       return
     }
 
@@ -218,9 +249,10 @@ export class PlaybackController {
     piano: Soundfont,
     songTime: number,
     untilExclusive?: number,
+    notesOverride?: NoteView[],
   ): void {
     const cap = untilExclusive ?? songTime + SCHEDULE_AHEAD
-    const notes = this.getPlaybackNotes()
+    const notes = notesOverride ?? this.getPlaybackNotes()
     for (const n of notes) {
       if (n.time < songTime - 0.02) continue
       if (n.time >= cap) continue
@@ -237,11 +269,11 @@ export class PlaybackController {
     }
   }
 
-  /** For follow mode: compare user onset to expected (optional). */
-  getExpectedNotesAtNow(): number[] {
-    const t = this.getSongTime()
-    return this.getPlaybackNotes()
-      .filter((n) => Math.abs(n.time - t) < 0.08)
-      .map((n) => n.midi)
+  /** In wait mode, returns only the current onset group's pitches. Null when not waiting. */
+  getWaitExpectedMidi(): Set<number> | null {
+    if (this.mode !== 'wait' || !this.waiting) return null
+    const g = this.onsetGroups[this.waitCursor]
+    if (!g) return null
+    return new Set(g.mids)
   }
 }
