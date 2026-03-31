@@ -45,6 +45,21 @@ import { midiForQwertyKey } from '../input/qwertyMap'
 /** Fixed wall-clock step for ←/→ (musical beat length varies with tempo and confuses scrubbing). */
 const ARROW_NUDGE_SEC = 0.5
 
+/**
+ * Loop end knob: CC → position using u² so most of the knob travel
+ * gives fine control (small steps), only the last ~20% of travel is coarser.
+ * Pickup uses the inverse (sqrt) so soft-takeover aligns.
+ */
+function loopEndKnobNormalizedFromCc(v: number): number {
+  const u = Math.max(0, Math.min(1, v / 127))
+  return u * u
+}
+
+function loopEndKnobCcFromNormalized(uPlay: number): number {
+  const x = Math.max(0, Math.min(1, uPlay))
+  return Math.round(Math.sqrt(x) * 127)
+}
+
 function sameTrackIndexList(a: number[], b: number[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i])
 }
@@ -870,44 +885,62 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         const PICKUP_THRESH = 3
 
         if (bind.loopStartKnob && matchesCcControl(bind.loopStartKnob, data)) {
-          const currentCc = Math.round((loopARef.current / d) * 127)
+          const b = loopBRef.current
+          const maxA = Math.max(0, b - 0.05)
+          const currentCc =
+            maxA > 1e-6
+              ? Math.round((loopARef.current / maxA) * 127)
+              : 64
           if (!pu.loopStart) {
             if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopStart = true
             else return
           }
-          const t = (v / 127) * d
+          const t = maxA > 0 ? (v / 127) * maxA : 0
           setLoopEnabled(true)
-          const b = loopBRef.current
-          setLoopA(Math.max(0, Math.min(t, b - 0.05)))
+          setLoopA(Math.max(0, Math.min(t, maxA)))
           return
         }
         if (bind.loopEndKnob && matchesCcControl(bind.loopEndKnob, data)) {
-          const currentCc = Math.round((loopBRef.current / d) * 127)
+          const a = loopARef.current
+          const minB = a + 0.05
+          const span = Math.max(0, d - minB)
+          const uPlay =
+            span > 1e-6
+              ? Math.max(
+                  0,
+                  Math.min(1, (loopBRef.current - minB) / span),
+                )
+              : 0
+          const currentCc =
+            span > 1e-6 ? loopEndKnobCcFromNormalized(uPlay) : 64
           if (!pu.loopEnd) {
             if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopEnd = true
             else return
           }
-          const t = (v / 127) * d
+          const t =
+            minB + span * loopEndKnobNormalizedFromCc(v)
           setLoopEnabled(true)
-          const a = loopARef.current
-          setLoopB(Math.max(a + 0.05, Math.min(d, t)))
+          setLoopB(Math.max(minB, Math.min(d, t)))
           return
         }
         if (bind.loopShiftKnob && matchesCcControl(bind.loopShiftKnob, data)) {
           const a = loopARef.current
           const b = loopBRef.current
-          const span = b - a
-          if (span < 0.05) return
-          const center = (a + span / 2) / d
-          const currentCc = Math.round(center * 127)
+          const region = b - a
+          if (region < 0.05) return
+          const centerSec = (a + b) / 2
+          const currentCc = Math.round((centerSec / d) * 127)
           if (!pu.loopShift) {
             if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopShift = true
             else return
           }
           setLoopEnabled(true)
-          const maxStart = d - span
-          const newA = Math.max(0, Math.min(maxStart, (v / 127) * d - span / 2))
-          const newB = newA + span
+          const maxStart = d - region
+          const newA = Math.max(
+            0,
+            Math.min(maxStart, (v / 127) * d - region / 2),
+          )
+          const newB = newA + region
           setLoopA(newA)
           setLoopB(Math.min(d, newB))
           return

@@ -38,8 +38,9 @@ export function MidiMappingPanel({
         ). Watch the log while you press a button or turn a knob. Click Learn,
         then send that message again. Unmapped devices still use MIDI Clock
         transport (Start / Continue / Stop) when Play / Stop are not learned.
-        Record starts or clears a loop at the playhead; loop knobs map CC 0–127
-        across the full song. Track focus maps a knob across note tracks only;
+        Record starts or clears a loop at the playhead; loop start maps linearly
+        to the end marker; loop end uses a gentler curve so small moves near the
+        song end are finer. Track focus maps a knob across note tracks only;
         the track toggle adds or removes the focused track from practice (one
         track always stays on).
       </p>
