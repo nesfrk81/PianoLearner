@@ -10,6 +10,7 @@ import { usePianoLearner } from './hooks/usePianoLearner'
 import { MidiMappingPanel } from './ui/MidiMappingPanel'
 import { SettingsModal } from './ui/SettingsModal'
 import { MusicTimeline } from './ui/MusicTimeline'
+import type { ParsedMidiTrackInfo } from './types'
 import './App.css'
 
 function expectedMidiNow(
@@ -209,6 +210,186 @@ function SegmentedBar<T extends string>({
   )
 }
 
+function PracticeTracksDropdown({
+  tracks,
+  selectedTrackIndices,
+  setSelectedTrackIndices,
+  midiTrackFocusIndex,
+  midiTrackDropdownBump,
+  playing,
+}: {
+  tracks: ParsedMidiTrackInfo[]
+  selectedTrackIndices: number[]
+  setSelectedTrackIndices: (
+    next: number[] | ((prev: number[]) => number[]),
+  ) => void
+  midiTrackFocusIndex: number | null
+  midiTrackDropdownBump: number
+  playing: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const midiFocusRowRef = useRef<HTMLLabelElement | null>(null)
+
+  const selectableTracks = useMemo(
+    () => tracks.filter((t) => t.noteCount > 0),
+    [tracks],
+  )
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (midiTrackDropdownBump > 0) setOpen(true)
+  }, [midiTrackDropdownBump])
+
+  useEffect(() => {
+    if (playing) setOpen(false)
+  }, [playing])
+
+  useEffect(() => {
+    if (!open || midiTrackFocusIndex == null) return
+    const id = requestAnimationFrame(() => {
+      midiFocusRowRef.current?.scrollIntoView({ block: 'nearest' })
+    })
+    return () => cancelAnimationFrame(id)
+  }, [open, midiTrackFocusIndex, midiTrackDropdownBump])
+
+  const selectedCount = selectedTrackIndices.length
+  const focusTrack =
+    midiTrackFocusIndex != null
+      ? selectableTracks.find((t) => t.index === midiTrackFocusIndex)
+      : undefined
+
+  const toggleTrack = (index: number) => {
+    setSelectedTrackIndices((prev) => {
+      const set = new Set(prev)
+      if (set.has(index)) {
+        if (set.size <= 1) return prev
+        set.delete(index)
+      } else {
+        set.add(index)
+      }
+      return Array.from(set).sort((a, b) => a - b)
+    })
+  }
+
+  if (selectableTracks.length === 0) {
+    return (
+      <div className="track-dropdown track-dropdown--empty">
+        <span className="practice-bar-tracks-label" id="practice-tracks-label">
+          Tracks
+        </span>
+        <span
+          className="track-dropdown-empty"
+          aria-labelledby="practice-tracks-label"
+        >
+          No tracks with notes
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={'track-dropdown' + (open ? ' track-dropdown--open' : '')}
+      ref={wrapRef}
+    >
+      <span className="practice-bar-tracks-label" id="practice-tracks-label">
+        Tracks
+      </span>
+      <button
+        type="button"
+        className="track-dropdown-trigger"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-labelledby="practice-tracks-label"
+        title={
+          focusTrack
+            ? `${selectedCount} track${selectedCount === 1 ? '' : 's'} in practice; MIDI knob targets “${focusTrack.name}”.`
+            : `${selectedCount} track${selectedCount === 1 ? '' : 's'} in practice.`
+        }
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="track-dropdown-trigger-text">
+          <span className="track-dropdown-summary-row">
+            <span className="track-dropdown-summary-selected">
+              {selectedCount} in practice
+            </span>
+            {focusTrack ? (
+              <>
+                <span className="track-dropdown-summary-sep" aria-hidden>
+                  {' '}
+                  ·{' '}
+                </span>
+                <span className="track-dropdown-summary-focus" title="MIDI knob / toggle target">
+                  {focusTrack.name}
+                </span>
+              </>
+            ) : null}
+          </span>
+        </span>
+        <span className="track-dropdown-chevron" aria-hidden>
+          ▼
+        </span>
+      </button>
+      {open ? (
+        <div
+          className="track-dropdown-panel"
+          role="listbox"
+          aria-multiselectable
+        >
+          {selectableTracks.map((t) => {
+            const checked = selectedTrackIndices.includes(t.index)
+            const isMidiFocus = midiTrackFocusIndex === t.index
+            return (
+              <label
+                key={t.index}
+                ref={isMidiFocus ? midiFocusRowRef : undefined}
+                className={
+                  'track-dropdown-row' +
+                  (checked ? ' track-dropdown-row--selected' : '') +
+                  (isMidiFocus ? ' track-dropdown-row--midi-focus' : '')
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleTrack(t.index)}
+                />
+                <span className="track-dropdown-row-label">
+                  <span className="track-dropdown-row-name">{t.name}</span>
+                  <span className="track-dropdown-row-meta">
+                    {t.noteCount} notes
+                    {isMidiFocus ? (
+                      <span className="track-dropdown-row-badge">MIDI</span>
+                    ) : null}
+                  </span>
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export default function App() {
   const [latencyMs, setLatencyMs] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -234,10 +415,10 @@ export default function App() {
     midi,
     fileName,
     tracks,
-    selectedTrackIndex,
-    setSelectedTrackIndex,
-    soloTrack,
-    setSoloTrack,
+    selectedTrackIndices,
+    setSelectedTrackIndices,
+    midiTrackFocusIndex,
+    midiTrackDropdownBump,
     mode,
     setMode,
     playing,
@@ -624,29 +805,6 @@ export default function App() {
             <>
               <section className="panel grid settings-modal-section">
                 <label>
-                  Practice track
-                  <select
-                    value={selectedTrackIndex}
-                    onChange={(e) =>
-                      setSelectedTrackIndex(Number(e.target.value))
-                    }
-                  >
-                    {tracks.map((t) => (
-                      <option key={t.index} value={t.index}>
-                        {t.name} ({t.noteCount} notes)
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={soloTrack}
-                    onChange={(e) => setSoloTrack(e.target.checked)}
-                  />
-                  Solo this track
-                </label>
-                <label>
                   Hand split (sheet + fingering)
                   <input
                     type="number"
@@ -670,7 +828,7 @@ export default function App() {
             </>
           ) : (
             <p className="muted settings-modal-hint">
-              Open a MIDI file to configure practice track, mode, and MIDI
+              Open a MIDI file to configure hand split, latency, and MIDI
               hardware mapping.
             </p>
           )}
@@ -733,6 +891,14 @@ export default function App() {
                 { value: 'both' as const, label: 'Both', icon: <IconBothHands /> },
                 { value: 'right' as const, label: 'R', icon: <IconRightHand /> },
               ]}
+            />
+            <PracticeTracksDropdown
+              tracks={tracks}
+              selectedTrackIndices={selectedTrackIndices}
+              setSelectedTrackIndices={setSelectedTrackIndices}
+              midiTrackFocusIndex={midiTrackFocusIndex}
+              midiTrackDropdownBump={midiTrackDropdownBump}
+              playing={playing}
             />
           </div>
 

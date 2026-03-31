@@ -33,6 +33,13 @@ export type MidiHardwareBindings = {
   nextSong: MidiTriggerBinding
   /** Previous song in playlist (wraps). */
   previousSong: MidiTriggerBinding
+  /**
+   * Knob (CC 0–127) — chooses which note track is targeted by {@link trackToggle}.
+   * Maps across tracks that have notes only (same order as the Tracks dropdown).
+   */
+  trackFocusKnob: MidiControlBinding
+  /** Toggle: add/remove the focused track from practice selection (at least one stays on). */
+  trackToggle: MidiTriggerBinding
 }
 
 export const defaultMidiHardwareBindings: MidiHardwareBindings = {
@@ -47,12 +54,27 @@ export const defaultMidiHardwareBindings: MidiHardwareBindings = {
   loopShiftKnob: null,
   nextSong: null,
   previousSong: null,
+  trackFocusKnob: null,
+  trackToggle: null,
 }
 
 const STORAGE_KEY_V2 = 'piano-learner-midi-bindings-v2'
 const STORAGE_KEY_V1 = 'piano-learner-midi-bindings-v1'
 
-export type MidiLearnMode = 'play' | 'stop' | 'jumpToStart' | 'cycleMode' | 'cycleHand' | 'playhead' | 'loopA' | 'loopB' | 'loopShift' | 'nextSong' | 'previousSong'
+export type MidiLearnMode =
+  | 'play'
+  | 'stop'
+  | 'jumpToStart'
+  | 'cycleMode'
+  | 'cycleHand'
+  | 'playhead'
+  | 'loopA'
+  | 'loopB'
+  | 'loopShift'
+  | 'nextSong'
+  | 'previousSong'
+  | 'trackFocus'
+  | 'trackToggle'
 
 function normalizeBindings(
   o: Partial<MidiHardwareBindings>,
@@ -69,6 +91,8 @@ function normalizeBindings(
     loopShiftKnob: o.loopShiftKnob ?? null,
     nextSong: o.nextSong ?? null,
     previousSong: o.previousSong ?? null,
+    trackFocusKnob: o.trackFocusKnob ?? null,
+    trackToggle: o.trackToggle ?? null,
   }
 }
 
@@ -173,6 +197,7 @@ type TriggerLearnMode =
   | 'playhead'
   | 'nextSong'
   | 'previousSong'
+  | 'trackToggle'
 
 const triggerFieldMap: Record<TriggerLearnMode, keyof MidiHardwareBindings> = {
   play: 'play',
@@ -183,6 +208,7 @@ const triggerFieldMap: Record<TriggerLearnMode, keyof MidiHardwareBindings> = {
   playhead: 'loopAtPlayhead',
   nextSong: 'nextSong',
   previousSong: 'previousSong',
+  trackToggle: 'trackToggle',
 }
 
 function learnTriggerField(
@@ -232,6 +258,15 @@ export function learnFromMessage(
     }
     return null
   }
+  if (mode === 'trackFocus') {
+    if ((st & 0xf0) === 0xb0 && data.length >= 3) {
+      return {
+        ...current,
+        trackFocusKnob: { channel: ch, controller: data[1] },
+      }
+    }
+    return null
+  }
   return null
 }
 
@@ -247,6 +282,8 @@ export function describeBinding(b: MidiHardwareBindings): {
   loopShiftKnob: string
   nextSong: string
   previousSong: string
+  trackFocusKnob: string
+  trackToggle: string
 } {
   const trig = (t: MidiTriggerBinding) => {
     if (!t) return '—'
@@ -278,5 +315,7 @@ export function describeBinding(b: MidiHardwareBindings): {
     loopShiftKnob: knob(b.loopShiftKnob),
     nextSong: trig(b.nextSong),
     previousSong: trig(b.previousSong),
+    trackFocusKnob: knob(b.trackFocusKnob),
+    trackToggle: trig(b.trackToggle),
   }
 }

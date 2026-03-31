@@ -39,7 +39,9 @@ export function MidiMappingPanel({
         then send that message again. Unmapped devices still use MIDI Clock
         transport (Start / Continue / Stop) when Play / Stop are not learned.
         Record starts or clears a loop at the playhead; loop knobs map CC 0–127
-        across the full song.
+        across the full song. Track focus maps a knob across note tracks only;
+        the track toggle adds or removes the focused track from practice (one
+        track always stays on).
       </p>
       {!midiConnected && (
         <p className="muted">No USB MIDI device detected.</p>
@@ -103,6 +105,34 @@ export function MidiMappingPanel({
             onClick={() => toggle('cycleHand')}
           >
             {learnMode === 'cycleHand' ? 'Listening…' : 'Learn'}
+          </button>
+        </div>
+        <div className="midi-mapping-row">
+          <span className="midi-mapping-label">
+            Track focus (knob — which track toggle affects)
+          </span>
+          <code className="midi-mapping-value">{d.trackFocusKnob}</code>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!midiConnected}
+            onClick={() => toggle('trackFocus')}
+          >
+            {learnMode === 'trackFocus' ? 'Listening…' : 'Learn'}
+          </button>
+        </div>
+        <div className="midi-mapping-row">
+          <span className="midi-mapping-label">
+            Track toggle (add/remove focused track)
+          </span>
+          <code className="midi-mapping-value">{d.trackToggle}</code>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!midiConnected}
+            onClick={() => toggle('trackToggle')}
+          >
+            {learnMode === 'trackToggle' ? 'Listening…' : 'Learn'}
           </button>
         </div>
         <div className="midi-mapping-row">

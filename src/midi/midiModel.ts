@@ -31,6 +31,37 @@ export function notesForTrack(midi: Midi, index: number): NoteView[] {
   }))
 }
 
+/** Valid unique sorted indices with notes only; if empty or all invalid, defaults to first track that has notes (or 0). */
+export function normalizeTrackIndices(midi: Midi, indices: number[]): number[] {
+  const max = midi.tracks.length
+  if (max === 0) return []
+  const u = [...new Set(indices)]
+    .filter(
+      (i) =>
+        Number.isFinite(i) &&
+        i >= 0 &&
+        i < max &&
+        trackHasNotes(midi, i),
+    )
+    .sort((a, b) => a - b)
+  if (u.length === 0) {
+    const first = trackSummaries(midi).find((s) => s.noteCount > 0)?.index ?? 0
+    return [first]
+  }
+  return u
+}
+
+export function notesForTracks(midi: Midi, indices: number[]): NoteView[] {
+  const norm = normalizeTrackIndices(midi, indices)
+  if (norm.length === 0) return []
+  const merged: NoteView[] = []
+  for (const i of norm) {
+    merged.push(...notesForTrack(midi, i))
+  }
+  merged.sort((a, b) => a.time - b.time || a.midi - b.midi)
+  return merged
+}
+
 /** All note events from all tracks (for full playback). */
 export function allNotesFlat(midi: Midi): NoteView[] {
   const out: NoteView[] = []

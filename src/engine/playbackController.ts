@@ -1,6 +1,6 @@
 import type { Midi } from '@tonejs/midi'
 import type { Soundfont } from 'smplr'
-import { allNotesFlat, notesForTrack } from '../midi/midiModel'
+import { allNotesFlat, normalizeTrackIndices, notesForTracks } from '../midi/midiModel'
 import type { NoteView, HandFilter } from '../types'
 import type { PracticeMode } from '../types'
 import { groupNotesByOnset, type OnsetGroup } from './onsetGroups'
@@ -10,8 +10,7 @@ const EPS = 0.025
 
 export class PlaybackController {
   midi: Midi | null = null
-  selectedTrackIndex = 0
-  soloTrack = true
+  selectedTrackIndices: number[] = [0]
   mode: PracticeMode = 'listen'
   handFilter: HandFilter = 'both'
   splitMidi = 60
@@ -38,14 +37,28 @@ export class PlaybackController {
     this.getPiano = getPiano
   }
 
+  /** Browsers suspend AudioContext when the tab is backgrounded; resume before scheduling output. */
+  private ensureContextRunning(): void {
+    if (this.ctx.state !== 'running' && this.ctx.state !== 'closed') {
+      void this.ctx.resume()
+    }
+  }
+
   setMidi(m: Midi | null): void {
     this.midi = m
     this.rebuildOnsets()
     this.scheduled.clear()
   }
 
-  setSelectedTrack(index: number): void {
-    this.selectedTrackIndex = index
+  setSelectedTracks(indices: number[]): void {
+    if (!this.midi) {
+      this.selectedTrackIndices =
+        indices.length > 0
+          ? [...new Set(indices)].filter((i) => i >= 0).sort((a, b) => a - b)
+          : [0]
+    } else {
+      this.selectedTrackIndices = normalizeTrackIndices(this.midi, indices)
+    }
     this.rebuildOnsets()
     this.scheduled.clear()
     const t = this.getSongTime()
@@ -76,12 +89,12 @@ export class PlaybackController {
   }
 
   rebuildOnsets(): void {
-    if (!this.midi || !this.midi.tracks[this.selectedTrackIndex]) {
+    if (!this.midi || this.selectedTrackIndices.length === 0) {
       this.onsetGroups = []
       this.practiceNoteIds = new Set()
       return
     }
-    const raw = notesForTrack(this.midi, this.selectedTrackIndex)
+    const raw = notesForTracks(this.midi, this.selectedTrackIndices)
     this.practiceNoteIds = new Set(raw.map((n) => n.id))
     const notes = this.filterByHand(raw)
     this.onsetGroups = groupNotesByOnset(notes)
@@ -89,9 +102,7 @@ export class PlaybackController {
 
   getPlaybackNotes(): NoteView[] {
     if (!this.midi) return []
-    const raw = this.soloTrack
-      ? notesForTrack(this.midi, this.selectedTrackIndex)
-      : allNotesFlat(this.midi)
+    const raw = notesForTracks(this.midi, this.selectedTrackIndices)
     return this.filterByHand(raw)
   }
 
@@ -141,6 +152,7 @@ export class PlaybackController {
   /** Frame tick: schedule upcoming notes and handle loop / wait. */
   tick(): void {
     if (!this.playing || !this.midi) return
+    this.ensureContextRunning()
     const piano = this.getPiano()
     if (!piano) return
 
@@ -213,6 +225,7 @@ export class PlaybackController {
     const g = this.onsetGroups[this.waitCursor]
     if (!g) return
 
+    this.ensureContextRunning()
     const piano = this.getPiano()
     if (piano) {
       const now = this.ctx.currentTime
@@ -251,6 +264,7 @@ export class PlaybackController {
     untilExclusive?: number,
     notesOverride?: NoteView[],
   ): void {
+    this.ensureContextRunning()
     const cap = untilExclusive ?? songTime + SCHEDULE_AHEAD
     const notes = notesOverride ?? this.getPlaybackNotes()
     for (const n of notes) {

@@ -15,7 +15,10 @@ export function loadAcousticGrandPiano(
         ? (p) => onProgress(p.loaded, p.total)
         : undefined,
     })
-    loadPromise = sf.loaded()
+    loadPromise = sf.loaded().catch((err) => {
+      loadPromise = null
+      throw err
+    })
   }
   return loadPromise
 }
