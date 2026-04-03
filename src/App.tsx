@@ -515,7 +515,6 @@ export default function App() {
     midiConnected,
     playbackNotes,
     loopEnabled,
-    setLoopEnabled,
     loopA,
     setLoopA,
     loopB,

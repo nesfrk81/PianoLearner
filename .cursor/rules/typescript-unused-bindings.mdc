@@ -1,0 +1,11 @@
+---
+description: Avoid unused destructured bindings; they fail the production build.
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# TypeScript unused locals (build)
+
+- `tsconfig.app.json` enables **`noUnusedLocals`** and **`noUnusedParameters`**. `npm run build` runs **`tsc -b`** and will fail on unused variables, including **unused destructured** properties (e.g. `setLoopEnabled` from a hook when never used).
+- Do not destructure return values unless they are used. Omit the binding entirely instead of leaving it “for later.”
+- For intentionally unused names (e.g. a callback argument), prefix with **`_`** so ESLint `@typescript-eslint/no-unused-vars` ignores them (`argsIgnorePattern` / `varsIgnorePattern`).

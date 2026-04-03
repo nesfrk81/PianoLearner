@@ -19,5 +19,16 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Align with tsconfig noUnusedLocals / noUnusedParameters; catch unused destructuring (e.g. hook returns).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrors: 'none',
+        },
+      ],
+    },
   },
 ])
