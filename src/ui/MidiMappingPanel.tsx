@@ -36,7 +36,8 @@ export function MidiMappingPanel({
         Bindings are saved in this browser (
         <code className="midi-storage-key">localStorage</code>
         ). Watch the log while you press a button or turn a knob. Click Learn,
-        then send that message again. Unmapped devices still use MIDI Clock
+        then press and release the button — the app detects whether it is a
+        toggle or momentary switch automatically. Unmapped devices still use MIDI Clock
         transport (Start / Continue / Stop) when Play / Stop are not learned.
         Record starts or clears a loop at the playhead; loop start maps linearly
         to the end marker; loop end uses a gentler curve so small moves near the

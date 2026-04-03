@@ -52,7 +52,7 @@
 .app-header-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.35rem;
   flex-shrink: 0;
 }
@@ -104,11 +104,11 @@
   top: calc(100% + 6px);
   right: 0;
   z-index: 80;
-  width: min(22rem, calc(100vw - 2rem));
-  max-height: min(70vh, 22rem);
+  width: min(30rem, calc(100vw - 2rem));
+  max-height: min(82vh, 34rem);
   display: flex;
   flex-direction: column;
-  padding: 0.65rem 0.75rem;
+  padding: 0.75rem 0.9rem;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg, #121212);
@@ -189,18 +189,30 @@
 }
 
 .panel-now-playing {
-  align-items: baseline;
-  gap: 0.5rem 1rem;
+  align-items: center;
 }
 
-.now-playing-label {
-  font-size: 0.8rem;
+.now-playing-line {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--text-h);
+  word-break: break-word;
+}
+
+.now-playing-prefix {
   font-weight: 600;
-  opacity: 0.85;
+  opacity: 0.88;
 }
 
-.app-settings-cog {
-  margin-top: 0.15rem;
+.now-playing-name {
+  font-weight: 500;
+}
+
+.now-playing-time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.78;
+  font-size: 0.92em;
 }
 
 .settings-modal-backdrop {
@@ -317,7 +329,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  max-height: 12rem;
+  max-height: min(22rem, 50vh);
   overflow: auto;
 }
 
@@ -357,6 +369,12 @@
 
 .playlist-remove {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.45rem;
+  line-height: 0;
+  font-size: 0;
 }
 
 .playlist-hint {
@@ -438,11 +456,6 @@
   margin-top: 0.25rem;
 }
 
-.file-name {
-  font-size: 0.9rem;
-  align-self: center;
-}
-
 .muted {
   opacity: 0.75;
   font-size: 0.9rem;
@@ -450,6 +463,26 @@
 
 .transport {
   align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.transport-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.65rem;
+  padding: 0.4rem 0.55rem;
+  line-height: 0;
+}
+
+.transport-icon-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.transport-midi-status {
+  margin-left: auto;
+  font-size: 0.85rem;
 }
 
 .loop-panel {
@@ -947,12 +980,6 @@
 .akb-b .akb-fg {
   color: #eee;
   text-shadow: 0 0 3px #000;
-}
-
-.time-readout {
-  font-variant-numeric: tabular-nums;
-  font-size: 0.95rem;
-  color: var(--text-h);
 }
 
 .vk-disclaimer {

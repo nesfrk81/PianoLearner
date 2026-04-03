@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,6 +9,12 @@ import { usePianoLearner } from './hooks/usePianoLearner'
 import { MidiMappingPanel } from './ui/MidiMappingPanel'
 import { SettingsModal } from './ui/SettingsModal'
 import { MusicTimeline } from './ui/MusicTimeline'
+import {
+  KEYBED_KEY_OPTIONS,
+  loadKeybedKeyCount,
+  midiRangeForKeyCount,
+  saveKeybedKeyCount,
+} from './ui/keybedRange'
 import type { ParsedMidiTrackInfo } from './types'
 import './App.css'
 
@@ -22,32 +27,6 @@ function expectedMidiNow(
     if (t >= n.time - 0.05 && t <= n.time + n.duration) s.add(n.midi)
   }
   return s
-}
-
-const LOOP_OVERLAY_HALF_SEC = 0.5
-
-/** When the score spans more chromatic keys than this, waterfall + keybed use a centered window (61 = common keyboard width). */
-const KEYBED_CHROMATIC_KEYS = 61
-
-function narrowKeybedToKeyCount(
-  pr: { min: number; max: number },
-  keyCount: number,
-): { min: number; max: number } {
-  const span = pr.max - pr.min
-  const maxSpan = keyCount - 1
-  if (span <= maxSpan) return pr
-  const mid = (pr.min + pr.max) / 2
-  let min = Math.round(mid - maxSpan / 2)
-  let max = min + maxSpan
-  if (min < 21) {
-    min = 21
-    max = min + maxSpan
-  }
-  if (max > 108) {
-    max = 108
-    min = max - maxSpan
-  }
-  return { min, max }
 }
 
 function CogIcon() {
@@ -104,6 +83,93 @@ function PlusIcon() {
       aria-hidden
     >
       <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" />
+      <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  )
+}
+
+function IconJumpToStart() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M5 4v16" />
+      <path d="M9 6l10 6-10 6V6z" />
+    </svg>
+  )
+}
+
+function IconPlay() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      aria-hidden
+    >
+      <path fill="currentColor" d="M8 5v14l11-7-11-7z" />
+    </svg>
+  )
+}
+
+function IconPause() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      aria-hidden
+    >
+      <path fill="currentColor" d="M7 5h3v14H7V5zm7 0h3v14h-3V5z" />
+    </svg>
+  )
+}
+
+function IconStop() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      aria-hidden
+    >
+      <path
+        fill="currentColor"
+        d="M7 7h10v10H7V7z"
+      />
     </svg>
   )
 }
@@ -392,18 +458,20 @@ function PracticeTracksDropdown({
 
 export default function App() {
   const [latencyMs, setLatencyMs] = useState(0)
+  const [keybedKeyCount, setKeybedKeyCount] = useState(() =>
+    loadKeybedKeyCount(),
+  )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [playlistOpen, setPlaylistOpen] = useState(false)
   const playlistPopoverRef = useRef<HTMLDivElement>(null)
   const midiAddInputRef = useRef<HTMLInputElement>(null)
   const [loopSheetOverlay, setLoopSheetOverlay] = useState(false)
   const closeLoopSheetOverlay = useCallback(() => setLoopSheetOverlay(false), [])
-  const loopAtPlayheadFnRef = useRef<() => void>(() => {})
   const keyboardTransportBlockedRef = useRef(false)
   keyboardTransportBlockedRef.current = settingsOpen
   const pl = usePianoLearner({
     onLoopCleared: closeLoopSheetOverlay,
-    onLoopAtPlayhead: () => loopAtPlayheadFnRef.current(),
+    onLoopAtPlayhead: () => setLoopSheetOverlay(true),
     keyboardTransportBlockedRef,
   })
 
@@ -423,6 +491,7 @@ export default function App() {
     setMode,
     playing,
     togglePlay,
+    pausePlayback,
     songTime,
     seek,
     jumpToStart,
@@ -430,8 +499,6 @@ export default function App() {
     setHandFilter,
     splitMidi,
     setSplitMidi,
-    octaveShift,
-    setOctaveShift,
     midiVelocitySensitivity,
     setMidiVelocitySensitivity,
     addMidiFiles,
@@ -453,6 +520,7 @@ export default function App() {
     setLoopA,
     loopB,
     setLoopB,
+    initLoopAtCenter,
     clearLoop,
     midiHardwareBindings,
     midiLearnMode,
@@ -462,21 +530,13 @@ export default function App() {
     resetMidiHardwareBindings,
   } = pl
 
-  const pitchRange = useMemo(() => {
-    if (playbackNotes.length === 0) return { min: 48, max: 84 }
-    let min = 127
-    let max = 0
-    for (const n of playbackNotes) {
-      min = Math.min(min, n.midi)
-      max = Math.max(max, n.midi)
-    }
-    return { min: Math.max(21, min - 3), max: Math.min(108, max + 3) }
-  }, [playbackNotes])
+  useEffect(() => {
+    saveKeybedKeyCount(keybedKeyCount)
+  }, [keybedKeyCount])
 
-  /** Waterfall + keybed share columns — cap to 61 chromatic keys when the piece is very wide */
-  const keybedRange = useMemo(
-    () => narrowKeybedToKeyCount(pitchRange, KEYBED_CHROMATIC_KEYS),
-    [pitchRange],
+  const { minMidi: keybedMinMidi, maxMidi: keybedMaxMidi } = useMemo(
+    () => midiRangeForKeyCount(keybedKeyCount),
+    [keybedKeyCount],
   )
 
   const expectedMidi = useMemo(
@@ -489,25 +549,11 @@ export default function App() {
 
   const initLoopFromSheet = useCallback(
     (centerSec: number) => {
-      const d = duration
-      if (d <= 0) return
-      let a = Math.max(0, centerSec - LOOP_OVERLAY_HALF_SEC)
-      let b = Math.min(d, centerSec + LOOP_OVERLAY_HALF_SEC)
-      if (b - a < 0.05) {
-        b = Math.min(d, a + 0.05)
-        if (b - a < 0.05) a = Math.max(0, b - 0.05)
-      }
-      setLoopA(a)
-      setLoopB(b)
-      setLoopEnabled(true)
+      initLoopAtCenter(centerSec)
       setLoopSheetOverlay(true)
     },
-    [duration, setLoopA, setLoopB, setLoopEnabled],
+    [initLoopAtCenter],
   )
-
-  useLayoutEffect(() => {
-    loopAtPlayheadFnRef.current = () => initLoopFromSheet(songTime)
-  }, [initLoopFromSheet, songTime])
 
   const onLoopBoundsChange = useCallback(
     (a: number, b: number) => {
@@ -562,8 +608,8 @@ export default function App() {
           <h1>Piano Learner</h1>
           <p className="app-sub">
             Sheet music on top, falling notes in the middle (hit the red line),
-            keys below — same columns. Space: play/pause. Arrows: ±0.5s. USB MIDI
-            + QWERTY. Home: jump to start.
+            keys below — same columns. Space: play/pause. Arrows: ±0.5s. USB MIDI.
+            Home: jump to start.
           </p>
         </div>
         {audioReady && (
@@ -673,11 +719,12 @@ export default function App() {
                           </button>
                           <button
                             type="button"
-                            className="btn small playlist-remove"
+                            className="btn playlist-remove"
                             onClick={() => void removePlaylistSong(p.id)}
                             title="Remove from playlist"
+                            aria-label="Remove from playlist"
                           >
-                            Remove
+                            <TrashIcon />
                           </button>
                         </li>
                       ))}
@@ -695,7 +742,7 @@ export default function App() {
             </div>
             <button
               type="button"
-              className="btn-icon app-settings-cog"
+              className="btn-icon"
               onClick={() => {
                 setPlaylistOpen(false)
                 setSettingsOpen(true)
@@ -746,8 +793,16 @@ export default function App() {
         </section>
       ) : (
         <section className="panel panel-midi-files panel-now-playing">
-          <span className="now-playing-label">Now playing</span>
-          <span className="file-name">{fileName || '—'}</span>
+          <p className="now-playing-line">
+            <span className="now-playing-prefix">Now playing:</span>{' '}
+            <span className="now-playing-name">{fileName || '—'}</span>
+            {midi ? (
+              <span className="now-playing-time">
+                {' '}
+                ({songTime.toFixed(1)}s / {duration.toFixed(1)}s)
+              </span>
+            ) : null}
+          </p>
         </section>
       )}
 
@@ -769,14 +824,19 @@ export default function App() {
               />
             </label>
             <label>
-              QWERTY octave shift
-              <input
-                type="number"
-                min={-3}
-                max={3}
-                value={octaveShift}
-                onChange={(e) => setOctaveShift(Number(e.target.value))}
-              />
+              Keyboard width
+              <select
+                value={keybedKeyCount}
+                onChange={(e) =>
+                  setKeybedKeyCount(Number(e.target.value))
+                }
+              >
+                {KEYBED_KEY_OPTIONS.map((o) => (
+                  <option key={o.keys} value={o.keys}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="midi-touch-sensitivity">
               MIDI touch sensitivity
@@ -840,23 +900,33 @@ export default function App() {
           <section className="panel transport">
             <button
               type="button"
-              className="btn"
+              className="btn transport-icon-btn"
               onClick={() => jumpToStart()}
               title="Jump to start (Home)"
+              aria-label="Jump to start"
             >
-              Jump to start
+              <IconJumpToStart />
             </button>
             <button
               type="button"
-              className="btn primary"
+              className="btn primary transport-icon-btn"
               onClick={() => void togglePlay()}
+              title={playing ? 'Pause' : 'Play'}
+              aria-label={playing ? 'Pause' : 'Play'}
             >
-              {playing ? 'Pause' : 'Play'}
+              {playing ? <IconPause /> : <IconPlay />}
             </button>
-            <span className="time-readout" aria-live="polite">
-              {songTime.toFixed(1)}s / {duration.toFixed(1)}s
-            </span>
-            <span className="muted">
+            <button
+              type="button"
+              className="btn transport-icon-btn"
+              onClick={() => pausePlayback()}
+              disabled={!playing}
+              title="Stop"
+              aria-label="Stop"
+            >
+              <IconStop />
+            </button>
+            <span className="muted transport-midi-status">
               {midiConnected ? `MIDI: ${midiConnected}` : 'No MIDI device'}
             </span>
             {loopEnabled && (
@@ -907,8 +977,8 @@ export default function App() {
               notes={playbackNotes}
               duration={duration}
               songTime={songTime}
-              minPitch={keybedRange.min}
-              maxPitch={keybedRange.max}
+              minPitch={keybedMinMidi}
+              maxPitch={keybedMaxMidi}
               splitMidi={splitMidi}
               loopEnabled={loopEnabled}
               loopA={loopA}

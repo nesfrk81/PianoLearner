@@ -4,7 +4,13 @@ export type MidiControlBinding = {
 } | null
 
 export type MidiTriggerBinding =
-  | { kind: 'cc'; channel: number; controller: number }
+  | {
+      kind: 'cc'
+      channel: number
+      controller: number
+      /** The CC value sent on physical press (learned). Fire only on this value. */
+      pressValue: number
+    }
   | { kind: 'noteOn'; channel: number; note: number }
   /** System realtime (1 byte), e.g. Start 0xfa, Continue 0xfb, Stop 0xfc */
   | { kind: 'sysRealtime'; status: number }
@@ -137,7 +143,9 @@ export function matchesTrigger(
   if (data.length < 2) return false
   const ch = st & 0x0f
   if (b.kind === 'cc' && (st & 0xf0) === 0xb0 && data.length >= 3) {
-    return ch === b.channel && data[1] === b.controller
+    if (ch !== b.channel || data[1] !== b.controller) return false
+    if (b.pressValue !== undefined) return (data[2] ?? 0) === b.pressValue
+    return true
   }
   if (b.kind === 'noteOn' && (st & 0xf0) === 0x90 && data.length >= 3) {
     return (
@@ -148,8 +156,9 @@ export function matchesTrigger(
 }
 
 /**
- * CC buttons: fire on value ≥ 64; note-on: velocity > 0.
- * Used for play, stop, and record/loop toggles.
+ * CC buttons fire only when the value matches the learned press value
+ * (ignores the release half of momentary buttons).
+ * Old bindings without pressValue fall back to any-value matching.
  */
 export function matchesHardwareButtonTrigger(
   b: MidiTriggerBinding,
@@ -164,7 +173,8 @@ export function matchesHardwareButtonTrigger(
   const ch = st & 0x0f
   if (b.kind === 'cc' && (st & 0xf0) === 0xb0 && data.length >= 3) {
     if (ch !== b.channel || data[1] !== b.controller) return false
-    return (data[2] ?? 0) >= 64
+    if (b.pressValue !== undefined) return (data[2] ?? 0) === b.pressValue
+    return true
   }
   if (b.kind === 'noteOn' && (st & 0xf0) === 0x90 && data.length >= 3) {
     return ch === b.channel && data[1] === b.note && data[2] > 0
@@ -219,9 +229,9 @@ function learnTriggerField(
   const field = triggerFieldMap[mode]
   const st = data[0]
   const ch = st & 0x0f
+  /* CC buttons: two-step learn handled by the hook (captures press + release). */
   if ((st & 0xf0) === 0xb0 && data.length >= 3) {
-    const t: MidiTriggerBinding = { kind: 'cc', channel: ch, controller: data[1] }
-    return { ...current, [field]: t }
+    return null
   }
   if ((st & 0xf0) === 0x90 && data.length >= 3 && data[2] > 0) {
     const t: MidiTriggerBinding = { kind: 'noteOn', channel: ch, note: data[1] }
@@ -236,6 +246,34 @@ function learnTriggerField(
     }
   }
   return null
+}
+
+export function isCcMessage(data: Uint8Array): boolean {
+  return data.length >= 3 && (data[0]! & 0xf0) === 0xb0
+}
+
+export function isTriggerLearnMode(
+  mode: MidiLearnMode,
+): mode is TriggerLearnMode {
+  return mode in triggerFieldMap
+}
+
+/**
+ * Build a CC trigger binding after two-step learn.
+ * @param pressValue - the CC value from the physical press (momentary button).
+ *   `undefined` for toggle buttons (fire on any value).
+ */
+export function buildCcTrigger(
+  mode: TriggerLearnMode,
+  channel: number,
+  controller: number,
+  pressValue: number | undefined,
+  current: MidiHardwareBindings,
+): MidiHardwareBindings {
+  const field = triggerFieldMap[mode]
+  const t: MidiTriggerBinding = { kind: 'cc', channel, controller, pressValue: pressValue! }
+  if (pressValue === undefined) delete (t as { pressValue?: number }).pressValue
+  return { ...current, [field]: t }
 }
 
 /** Capture learn target from first eligible message. Returns updated bindings or null if ignored. */
@@ -287,7 +325,10 @@ export function describeBinding(b: MidiHardwareBindings): {
 } {
   const trig = (t: MidiTriggerBinding) => {
     if (!t) return '—'
-    if (t.kind === 'cc') return `CC ch${t.channel + 1} #${t.controller}`
+    if (t.kind === 'cc') {
+      const base = `CC ch${t.channel + 1} #${t.controller}`
+      return t.pressValue !== undefined ? `${base} press=${t.pressValue}` : base
+    }
     if (t.kind === 'noteOn') return `Note On ch${t.channel + 1} ${t.note}`
     const label =
       t.status === 0xfa

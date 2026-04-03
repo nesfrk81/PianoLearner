@@ -16,7 +16,10 @@ import {
 import { computeFingeringMap } from '../engine/fingering'
 import { PlaybackController } from '../engine/playbackController'
 import {
+  buildCcTrigger,
   defaultMidiHardwareBindings,
+  isCcMessage,
+  isTriggerLearnMode,
   learnFromMessage,
   loadMidiHardwareBindings,
   matchesCcControl,
@@ -39,26 +42,21 @@ import {
   notesForTracks,
   trackSummaries,
 } from '../midi/midiModel'
+import {
+  loadMidiVelocitySensitivity,
+  saveMidiVelocitySensitivity,
+} from '../midi/midiUserPreferences'
 import type { HandFilter, PracticeMode } from '../types'
-import { midiForQwertyKey } from '../input/qwertyMap'
+import {
+  ccToTimeIndex,
+  endAtOrAfter,
+  onsetAtOrBefore,
+  uniqueEnds,
+  uniqueOnsets,
+} from '../engine/loopSnap'
 
 /** Fixed wall-clock step for ←/→ (musical beat length varies with tempo and confuses scrubbing). */
 const ARROW_NUDGE_SEC = 0.5
-
-/**
- * Loop end knob: CC → position using u² so most of the knob travel
- * gives fine control (small steps), only the last ~20% of travel is coarser.
- * Pickup uses the inverse (sqrt) so soft-takeover aligns.
- */
-function loopEndKnobNormalizedFromCc(v: number): number {
-  const u = Math.max(0, Math.min(1, v / 127))
-  return u * u
-}
-
-function loopEndKnobCcFromNormalized(uPlay: number): number {
-  const x = Math.max(0, Math.min(1, uPlay))
-  return Math.round(Math.sqrt(x) * 127)
-}
 
 function sameTrackIndexList(a: number[], b: number[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i])
@@ -104,15 +102,17 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   const [playing, setPlaying] = useState(false)
   const [songTime, setSongTime] = useState(0)
   const [splitMidi, setSplitMidi] = useState(60)
-  const [octaveShift, setOctaveShift] = useState(0)
   /** Multiplier for USB MIDI note-on velocity (1 = as sent; higher = louder at same touch). */
-  const [midiVelocitySensitivity, setMidiVelocitySensitivity] = useState(1.5)
+  const [midiVelocitySensitivity, setMidiVelocitySensitivity] = useState(
+    loadMidiVelocitySensitivity,
+  )
 
   const [handFilter, setHandFilter] = useState<HandFilter>('both')
 
   const [loopEnabled, setLoopEnabled] = useState(false)
   const [loopA, setLoopA] = useState(0)
   const [loopB, setLoopB] = useState(8)
+  const [loopCenter, setLoopCenter] = useState<number | null>(null)
 
   const [midiConnected, setMidiConnected] = useState<string | null>(null)
 
@@ -124,10 +124,27 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   const bindingsRef = useRef(midiHardwareBindings)
   const midiLearnModeRef = useRef(midiLearnMode)
 
+  /**
+   * CC trigger learn: first CC captured here, waiting for a second (release).
+   * If a second CC on the same controller arrives quickly, it's a momentary
+   * button → store pressValue = firstValue (fire only on press, ignore release).
+   * If the timeout fires first, it's a toggle button → no pressValue (fire on any value).
+   */
+  const ccLearnPendingRef = useRef<{
+    mode: Parameters<typeof buildCcTrigger>[0]
+    channel: number
+    controller: number
+    firstValue: number
+    timer: ReturnType<typeof setTimeout>
+  } | null>(null)
+
   const songTimeRef = useRef(songTime)
   const loopARef = useRef(loopA)
   const loopBRef = useRef(loopB)
   const loopEnabledRef = useRef(loopEnabled)
+  const loopCenterRef = useRef(loopCenter)
+  const noteOnsetsRef = useRef<number[]>([])
+  const noteEndsRef = useRef<number[]>([])
 
   /** Soft-takeover: knob is ignored until it crosses the current parameter value. */
   const knobPickedUp = useRef({
@@ -152,6 +169,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     loopARef.current = loopA
     loopBRef.current = loopB
     loopEnabledRef.current = loopEnabled
+    loopCenterRef.current = loopCenter
   }, [
     onLoopAtPlayhead,
     midiHardwareBindings,
@@ -160,6 +178,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     loopA,
     loopB,
     loopEnabled,
+    loopCenter,
   ])
 
   const [userPressedMidi, setUserPressedMidi] = useState<Set<number>>(
@@ -255,6 +274,14 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       handFilter === 'left' ? n.midi < splitMidi : n.midi >= splitMidi,
     )
   }, [midi, selectedTrackIndices, handFilter, splitMidi])
+
+  const noteOnsets = useMemo(() => uniqueOnsets(playbackNotes), [playbackNotes])
+  const noteEnds = useMemo(() => uniqueEnds(playbackNotes), [playbackNotes])
+
+  useLayoutEffect(() => {
+    noteOnsetsRef.current = noteOnsets
+    noteEndsRef.current = noteEnds
+  }, [noteOnsets, noteEnds])
 
   const fingeringMap = useMemo(() => {
     if (!midi) return new Map<string, number>()
@@ -553,8 +580,35 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     seek(0)
   }, [seek])
 
+  const initLoopAtCenter = useCallback(
+    (center: number) => {
+      const onsets = noteOnsetsRef.current
+      const ends = noteEndsRef.current
+      if (onsets.length === 0 || ends.length === 0) return
+      const a = onsetAtOrBefore(onsets, center)
+      let b = endAtOrAfter(ends, center)
+      if (b <= a + 0.05) b = a + 0.05
+      setLoopCenter(center)
+      setLoopA(a)
+      setLoopB(b)
+      setLoopEnabled(true)
+      knobPickedUp.current = {
+        loopStart: false,
+        loopEnd: false,
+        loopShift: false,
+        trackFocus: knobPickedUp.current.trackFocus,
+      }
+    },
+    [setLoopA, setLoopB, setLoopEnabled],
+  )
+  const initLoopAtCenterRef = useRef(initLoopAtCenter)
+  useLayoutEffect(() => {
+    initLoopAtCenterRef.current = initLoopAtCenter
+  }, [initLoopAtCenter])
+
   const clearLoop = useCallback(() => {
     setLoopEnabled(false)
+    setLoopCenter(null)
     knobPickedUp.current = {
       loopStart: false,
       loopEnd: false,
@@ -578,6 +632,17 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   useEffect(() => {
     saveMidiHardwareBindings(midiHardwareBindings)
   }, [midiHardwareBindings])
+
+  useEffect(() => {
+    saveMidiVelocitySensitivity(midiVelocitySensitivity)
+  }, [midiVelocitySensitivity])
+
+  useEffect(() => {
+    if (ccLearnPendingRef.current) {
+      clearTimeout(ccLearnPendingRef.current.timer)
+      ccLearnPendingRef.current = null
+    }
+  }, [midiLearnMode])
 
   const clearMidiActivityLog = useCallback(() => setMidiActivityLog([]), [])
 
@@ -711,33 +776,15 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         void togglePlay()
         return
       }
-      const m = midiForQwertyKey(e.key, octaveShift)
-      if (m != null) {
-        e.preventDefault()
-        onUserNoteOn(m)
-      }
-    }
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      const m = midiForQwertyKey(e.key, octaveShift)
-      if (m != null) {
-        e.preventDefault()
-        onUserNoteOff(m)
-      }
     }
     window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('keyup', onKeyUp)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('keyup', onKeyUp)
     }
   }, [
     keyboardTransportBlockedRef,
-    octaveShift,
     jumpToStart,
     nudgePlayhead,
-    onUserNoteOff,
-    onUserNoteOn,
     togglePlay,
   ])
 
@@ -762,14 +809,61 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
 
       const learnMode = midiLearnModeRef.current
       if (learnMode) {
+        if (isTriggerLearnMode(learnMode) && isCcMessage(data)) {
+          const ch = data[0]! & 0x0f
+          const cc = data[1]!
+          const val = data[2] ?? 0
+          const pending = ccLearnPendingRef.current
+
+          if (
+            pending &&
+            pending.mode === learnMode &&
+            pending.channel === ch &&
+            pending.controller === cc
+          ) {
+            clearTimeout(pending.timer)
+            ccLearnPendingRef.current = null
+            const result = buildCcTrigger(
+              learnMode, ch, cc, pending.firstValue, bindingsRef.current,
+            )
+            bindingsRef.current = result
+            setMidiHardwareBindings(result)
+            setMidiLearnMode(null)
+            /* Release message — don't fall through (would double-fire). */
+            return
+          }
+
+          if (pending) clearTimeout(pending.timer)
+          const timer = setTimeout(() => {
+            if (ccLearnPendingRef.current?.timer !== timer) return
+            ccLearnPendingRef.current = null
+            const result = buildCcTrigger(
+              learnMode, ch, cc, undefined, bindingsRef.current,
+            )
+            bindingsRef.current = result
+            setMidiHardwareBindings(result)
+            setMidiLearnMode(null)
+          }, 500)
+          ccLearnPendingRef.current = {
+            mode: learnMode, channel: ch, controller: cc, firstValue: val, timer,
+          }
+          return
+        }
+
+        if (ccLearnPendingRef.current) {
+          /* A CC learn is in progress — ignore non-CC traffic (active sensing,
+             note on/off, timing clock, etc.) while we wait for the second CC
+             or the 500 ms timeout. */
+          return
+        }
         const next = learnFromMessage(learnMode, data, bindingsRef.current)
         if (next) {
           bindingsRef.current = next
           setMidiHardwareBindings(next)
           setMidiLearnMode(null)
+        } else {
+          return
         }
-        /* While learning, never run transport / notes — e.g. Start/Stop must bind, not play */
-        return
       }
 
       const bind = bindingsRef.current
@@ -832,8 +926,9 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       if (loopTrig && matchesHardwareButtonTrigger(loopTrig, data)) {
         if (loopEnabledRef.current) {
           clearLoop()
-        } else if (onLoopAtPlayheadRef.current) {
-          onLoopAtPlayheadRef.current()
+        } else {
+          initLoopAtCenterRef.current(songTimeRef.current)
+          onLoopAtPlayheadRef.current?.()
         }
         return
       }
@@ -879,70 +974,71 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       }
 
       const d = midi?.duration ?? 0
-      if (d > 0 && (st & 0xf0) === 0xb0 && data.length >= 3) {
+      const center = loopCenterRef.current
+      if (d > 0 && center != null && (st & 0xf0) === 0xb0 && data.length >= 3) {
         const v = data[2] ?? 0
         const pu = knobPickedUp.current
         const PICKUP_THRESH = 3
+        const onsets = noteOnsetsRef.current
+        const ends = noteEndsRef.current
 
         if (bind.loopStartKnob && matchesCcControl(bind.loopStartKnob, data)) {
-          const b = loopBRef.current
-          const maxA = Math.max(0, b - 0.05)
-          const currentCc =
-            maxA > 1e-6
-              ? Math.round((loopARef.current / maxA) * 127)
-              : 64
+          const candidates = onsets.filter((t) => t <= center + 0.001)
+          if (candidates.length === 0) return
+          const idx = ccToTimeIndex(v, candidates)
+          const currentIdx = candidates.reduce(
+            (best, t, i) =>
+              Math.abs(t - loopARef.current) < Math.abs(candidates[best]! - loopARef.current) ? i : best,
+            0,
+          )
+          const currentCc = candidates.length <= 1 ? 64 : Math.round((currentIdx / (candidates.length - 1)) * 127)
           if (!pu.loopStart) {
             if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopStart = true
             else return
           }
-          const t = maxA > 0 ? (v / 127) * maxA : 0
-          setLoopEnabled(true)
-          setLoopA(Math.max(0, Math.min(t, maxA)))
+          const newA = candidates[idx]!
+          if (newA < loopBRef.current - 0.04) setLoopA(newA)
           return
         }
         if (bind.loopEndKnob && matchesCcControl(bind.loopEndKnob, data)) {
-          const a = loopARef.current
-          const minB = a + 0.05
-          const span = Math.max(0, d - minB)
-          const uPlay =
-            span > 1e-6
-              ? Math.max(
-                  0,
-                  Math.min(1, (loopBRef.current - minB) / span),
-                )
-              : 0
-          const currentCc =
-            span > 1e-6 ? loopEndKnobCcFromNormalized(uPlay) : 64
+          const candidates = ends.filter((t) => t >= center - 0.001)
+          if (candidates.length === 0) return
+          const idx = ccToTimeIndex(v, candidates)
+          const currentIdx = candidates.reduce(
+            (best, t, i) =>
+              Math.abs(t - loopBRef.current) < Math.abs(candidates[best]! - loopBRef.current) ? i : best,
+            0,
+          )
+          const currentCc = candidates.length <= 1 ? 64 : Math.round((currentIdx / (candidates.length - 1)) * 127)
           if (!pu.loopEnd) {
             if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopEnd = true
             else return
           }
-          const t =
-            minB + span * loopEndKnobNormalizedFromCc(v)
-          setLoopEnabled(true)
-          setLoopB(Math.max(minB, Math.min(d, t)))
+          const newB = candidates[idx]!
+          if (newB > loopARef.current + 0.04) setLoopB(Math.min(d, newB))
           return
         }
         if (bind.loopShiftKnob && matchesCcControl(bind.loopShiftKnob, data)) {
-          const a = loopARef.current
-          const b = loopBRef.current
-          const region = b - a
+          if (onsets.length === 0) return
+          const region = loopBRef.current - loopARef.current
           if (region < 0.05) return
-          const centerSec = (a + b) / 2
-          const currentCc = Math.round((centerSec / d) * 127)
+          const idx = ccToTimeIndex(v, onsets)
+          const currentIdx = onsets.reduce(
+            (best, t, i) =>
+              Math.abs(t - loopARef.current) < Math.abs(onsets[best]! - loopARef.current) ? i : best,
+            0,
+          )
+          const currentCc = onsets.length <= 1 ? 64 : Math.round((currentIdx / (onsets.length - 1)) * 127)
           if (!pu.loopShift) {
             if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopShift = true
             else return
           }
-          setLoopEnabled(true)
-          const maxStart = d - region
-          const newA = Math.max(
-            0,
-            Math.min(maxStart, (v / 127) * d - region / 2),
-          )
-          const newB = newA + region
+          const newA = onsets[idx]!
+          const newB = Math.min(d, newA + region)
           setLoopA(newA)
-          setLoopB(Math.min(d, newB))
+          setLoopB(newB)
+          setLoopCenter(newA + (newB - newA) / 2)
+          seek(newA)
           return
         }
       }
@@ -1033,12 +1129,11 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     setMode,
     playing,
     togglePlay,
+    pausePlayback,
     songTime,
     seek,
     splitMidi,
     setSplitMidi,
-    octaveShift,
-    setOctaveShift,
     midiVelocitySensitivity,
     setMidiVelocitySensitivity,
     addMidiFiles,
@@ -1061,6 +1156,10 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     setLoopA,
     loopB,
     setLoopB,
+    loopCenter,
+    initLoopAtCenter,
+    noteOnsets,
+    noteEnds,
     nudgePlayhead,
     jumpToStart,
     nextPlaylistSong,

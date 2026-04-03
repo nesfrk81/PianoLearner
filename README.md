@@ -1,6 +1,6 @@
 # Piano Learner
 
-Practice piano from **MIDI files**: staff + falling notes aligned with an on-screen keyboard, USB MIDI and QWERTY input, A/B loops, and optional practice modes.
+Practice piano from **MIDI files**: staff + falling notes aligned with an on-screen keyboard, **USB MIDI** input, A/B loops, and optional practice modes.
 
 ## Use it online (GitHub Pages)
 
@@ -11,7 +11,7 @@ Practice piano from **MIDI files**: staff + falling notes aligned with an on-scr
 3. **Wait** for the piano soundfont to finish loading (progress is shown briefly).
 4. **Load a MIDI file** — use **Open MIDI file** and pick a `.mid` / `.midi` from your computer.
 5. **Play** — use the **Play** / **Pause** button or press **Space**.
-6. **Settings** — click the **gear** (top right) to change practice track, mode, input latency, QWERTY octave, MIDI touch sensitivity, and **MIDI hardware** bindings.
+6. **Settings** — click the **gear** (top right) to change practice track, mode, input latency, MIDI touch sensitivity, and **MIDI hardware** bindings.
 
 ### Main controls
 
