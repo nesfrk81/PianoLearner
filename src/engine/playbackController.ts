@@ -20,6 +20,13 @@ export class PlaybackController {
   private anchorSong = 0
   private scheduled = new Set<string>()
   private frozenSongTime: number | null = null
+  /**
+   * Playback rate as a multiplier of the file's authored tempo (1.0 = MIDI's
+   * native speed). Song-time advances `timeScale` seconds of song per second
+   * of wall clock. Changes rebase `anchorSong`/`anchorAudio` in
+   * {@link setTimeScale} so the playhead stays continuous.
+   */
+  private timeScale = 1
 
   onsetGroups: OnsetGroup[] = []
   private waitCursor = 0
@@ -113,7 +120,36 @@ export class PlaybackController {
 
   getSongTime(): number {
     if (this.frozenSongTime != null) return this.frozenSongTime
-    return (this.ctx.currentTime - this.anchorAudio) + this.anchorSong
+    return (
+      (this.ctx.currentTime - this.anchorAudio) * this.timeScale +
+      this.anchorSong
+    )
+  }
+
+  getTimeScale(): number {
+    return this.timeScale
+  }
+
+  /**
+   * Change the playback rate. Clamped to 0.1–10×. While playing, rebases the
+   * song/audio anchors to preserve the current song position, and clears the
+   * schedule so future notes are re-dispatched at the new rate. Notes that
+   * were already queued on the AudioContext will play at their old scheduled
+   * wall-times — this may cause a small (<SCHEDULE_AHEAD) audio/playhead
+   * glitch right at a rate change, which is acceptable.
+   */
+  setTimeScale(scale: number): void {
+    const s = Math.max(0.1, Math.min(10, scale))
+    if (Math.abs(s - this.timeScale) < 1e-4) return
+    if (this.playing) {
+      const currentSong = this.getSongTime()
+      this.timeScale = s
+      this.anchorSong = currentSong
+      this.anchorAudio = this.ctx.currentTime
+      this.scheduled.clear()
+    } else {
+      this.timeScale = s
+    }
   }
 
   seek(sec: number): void {
@@ -229,11 +265,12 @@ export class PlaybackController {
     const piano = this.getPiano()
     if (piano) {
       const now = this.ctx.currentTime
+      const ts = this.timeScale
       for (const m of g.mids) {
         const n = this.getPlaybackNotes().find(
           (x) => Math.abs(x.time - g.time) < EPS && x.midi === m,
         )
-        const duration = n?.duration ?? 0.4
+        const duration = (n?.duration ?? 0.4) / ts
         piano.start({
           note: m,
           velocity: n ? Math.min(127, Math.round(n.velocity * 127)) : 90,
@@ -265,20 +302,24 @@ export class PlaybackController {
     notesOverride?: NoteView[],
   ): void {
     this.ensureContextRunning()
-    const cap = untilExclusive ?? songTime + SCHEDULE_AHEAD
+    /* SCHEDULE_AHEAD is a wall-clock horizon; convert to song-time so we look
+       further into the score when `timeScale > 1` (faster playback needs a
+       wider song-time window to cover the same wall-clock window). */
+    const cap = untilExclusive ?? songTime + SCHEDULE_AHEAD * this.timeScale
     const notes = notesOverride ?? this.getPlaybackNotes()
+    const ts = this.timeScale
     for (const n of notes) {
       if (n.time < songTime - 0.02) continue
       if (n.time >= cap) continue
       if (this.scheduled.has(n.id)) continue
       this.scheduled.add(n.id)
-      const delay = n.time - songTime
-      const when = this.ctx.currentTime + Math.max(0, delay)
+      const delaySong = n.time - songTime
+      const when = this.ctx.currentTime + Math.max(0, delaySong / ts)
       piano.start({
         note: n.midi,
         velocity: Math.min(127, Math.max(1, Math.round(n.velocity * 127))),
         time: when,
-        duration: Math.max(0.05, n.duration),
+        duration: Math.max(0.05, n.duration / ts),
       })
     }
   }

@@ -46,6 +46,12 @@ export type MidiHardwareBindings = {
   trackFocusKnob: MidiControlBinding
   /** Toggle: add/remove the focused track from practice selection (at least one stays on). */
   trackToggle: MidiTriggerBinding
+  /** Chord Learning: start/stop the metronome (same button). */
+  metronomeToggle: MidiTriggerBinding
+  /** Chord Learning: knob — BPM over 10 → 300 across CC 0 → 127. */
+  metronomeBpmKnob: MidiControlBinding
+  /** Chord Learning: knob — picks a chord from the current list (Free Practice or active lesson). */
+  chordPickerKnob: MidiControlBinding
 }
 
 export const defaultMidiHardwareBindings: MidiHardwareBindings = {
@@ -62,8 +68,12 @@ export const defaultMidiHardwareBindings: MidiHardwareBindings = {
   previousSong: null,
   trackFocusKnob: null,
   trackToggle: null,
+  metronomeToggle: null,
+  metronomeBpmKnob: null,
+  chordPickerKnob: null,
 }
 
+const STORAGE_KEY_V3 = 'piano-learner-midi-bindings-v3'
 const STORAGE_KEY_V2 = 'piano-learner-midi-bindings-v2'
 const STORAGE_KEY_V1 = 'piano-learner-midi-bindings-v1'
 
@@ -81,6 +91,9 @@ export type MidiLearnMode =
   | 'previousSong'
   | 'trackFocus'
   | 'trackToggle'
+  | 'metronomeToggle'
+  | 'metronomeBpm'
+  | 'chordPicker'
 
 function normalizeBindings(
   o: Partial<MidiHardwareBindings>,
@@ -99,15 +112,26 @@ function normalizeBindings(
     previousSong: o.previousSong ?? null,
     trackFocusKnob: o.trackFocusKnob ?? null,
     trackToggle: o.trackToggle ?? null,
+    metronomeToggle: o.metronomeToggle ?? null,
+    metronomeBpmKnob: o.metronomeBpmKnob ?? null,
+    chordPickerKnob: o.chordPickerKnob ?? null,
   }
 }
 
 export function loadMidiHardwareBindings(): MidiHardwareBindings {
   try {
+    const rawV3 = localStorage.getItem(STORAGE_KEY_V3)
+    if (rawV3) {
+      const o = JSON.parse(rawV3) as Partial<MidiHardwareBindings>
+      return normalizeBindings(o)
+    }
     const rawV2 = localStorage.getItem(STORAGE_KEY_V2)
     if (rawV2) {
       const o = JSON.parse(rawV2) as Partial<MidiHardwareBindings>
-      return normalizeBindings(o)
+      const n = normalizeBindings(o)
+      saveMidiHardwareBindings(n)
+      localStorage.removeItem(STORAGE_KEY_V2)
+      return n
     }
     const rawV1 = localStorage.getItem(STORAGE_KEY_V1)
     if (rawV1) {
@@ -125,7 +149,7 @@ export function loadMidiHardwareBindings(): MidiHardwareBindings {
 
 export function saveMidiHardwareBindings(b: MidiHardwareBindings): void {
   try {
-    localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(b))
+    localStorage.setItem(STORAGE_KEY_V3, JSON.stringify(b))
   } catch {
     /* ignore */
   }
@@ -208,6 +232,7 @@ type TriggerLearnMode =
   | 'nextSong'
   | 'previousSong'
   | 'trackToggle'
+  | 'metronomeToggle'
 
 const triggerFieldMap: Record<TriggerLearnMode, keyof MidiHardwareBindings> = {
   play: 'play',
@@ -219,6 +244,7 @@ const triggerFieldMap: Record<TriggerLearnMode, keyof MidiHardwareBindings> = {
   nextSong: 'nextSong',
   previousSong: 'previousSong',
   trackToggle: 'trackToggle',
+  metronomeToggle: 'metronomeToggle',
 }
 
 function learnTriggerField(
@@ -305,7 +331,86 @@ export function learnFromMessage(
     }
     return null
   }
+  if (mode === 'metronomeBpm') {
+    if ((st & 0xf0) === 0xb0 && data.length >= 3) {
+      return {
+        ...current,
+        metronomeBpmKnob: { channel: ch, controller: data[1] },
+      }
+    }
+    return null
+  }
+  if (mode === 'chordPicker') {
+    if ((st & 0xf0) === 0xb0 && data.length >= 3) {
+      return {
+        ...current,
+        chordPickerKnob: { channel: ch, controller: data[1] },
+      }
+    }
+    return null
+  }
   return null
+}
+
+/**
+ * Returns every binding field whose underlying MIDI source matches the
+ * incoming message, using a permissive match:
+ *   - CC triggers / CC knobs: match on channel + controller, any value (so both
+ *     press and release of a momentary button light up the row, and a knob
+ *     stays lit while it is being moved).
+ *   - Note triggers: match note on AND the implied note off (status 0x80 or
+ *     a 0x90 with velocity 0), so the row stays lit for the key's full press.
+ *   - System-realtime triggers: match the status byte.
+ *
+ * Used by the MIDI mapping UI to show the user which rows are already bound to
+ * the key / knob they just touched. Read-only — never mutates bindings.
+ */
+export function findMatchingBindingFields(
+  b: MidiHardwareBindings,
+  data: Uint8Array,
+): (keyof MidiHardwareBindings)[] {
+  const out: (keyof MidiHardwareBindings)[] = []
+  if (data.length < 1) return out
+  const st = data[0]!
+  const ch = st & 0x0f
+  const isCc = (st & 0xf0) === 0xb0 && data.length >= 3
+  const isNoteOn = (st & 0xf0) === 0x90 && data.length >= 3
+  const isNoteOff = (st & 0xf0) === 0x80 && data.length >= 2
+
+  const trigMatch = (t: MidiTriggerBinding): boolean => {
+    if (!t) return false
+    if (t.kind === 'sysRealtime') return st === t.status
+    if (t.kind === 'cc') {
+      return isCc && ch === t.channel && data[1] === t.controller
+    }
+    if (t.kind === 'noteOn') {
+      if (!(isNoteOn || isNoteOff)) return false
+      return ch === t.channel && data[1] === t.note
+    }
+    return false
+  }
+  const knobMatch = (k: MidiControlBinding): boolean => {
+    if (!k || !isCc) return false
+    return ch === k.channel && data[1] === k.controller
+  }
+
+  if (trigMatch(b.play)) out.push('play')
+  if (trigMatch(b.stop)) out.push('stop')
+  if (trigMatch(b.jumpToStart)) out.push('jumpToStart')
+  if (trigMatch(b.cycleMode)) out.push('cycleMode')
+  if (trigMatch(b.cycleHand)) out.push('cycleHand')
+  if (trigMatch(b.loopAtPlayhead)) out.push('loopAtPlayhead')
+  if (trigMatch(b.nextSong)) out.push('nextSong')
+  if (trigMatch(b.previousSong)) out.push('previousSong')
+  if (trigMatch(b.trackToggle)) out.push('trackToggle')
+  if (trigMatch(b.metronomeToggle)) out.push('metronomeToggle')
+  if (knobMatch(b.loopStartKnob)) out.push('loopStartKnob')
+  if (knobMatch(b.loopEndKnob)) out.push('loopEndKnob')
+  if (knobMatch(b.loopShiftKnob)) out.push('loopShiftKnob')
+  if (knobMatch(b.trackFocusKnob)) out.push('trackFocusKnob')
+  if (knobMatch(b.metronomeBpmKnob)) out.push('metronomeBpmKnob')
+  if (knobMatch(b.chordPickerKnob)) out.push('chordPickerKnob')
+  return out
 }
 
 export function describeBinding(b: MidiHardwareBindings): {
@@ -322,6 +427,9 @@ export function describeBinding(b: MidiHardwareBindings): {
   previousSong: string
   trackFocusKnob: string
   trackToggle: string
+  metronomeToggle: string
+  metronomeBpmKnob: string
+  chordPickerKnob: string
 } {
   const trig = (t: MidiTriggerBinding) => {
     if (!t) return '—'
@@ -358,5 +466,8 @@ export function describeBinding(b: MidiHardwareBindings): {
     previousSong: trig(b.previousSong),
     trackFocusKnob: knob(b.trackFocusKnob),
     trackToggle: trig(b.trackToggle),
+    metronomeToggle: trig(b.metronomeToggle),
+    metronomeBpmKnob: knob(b.metronomeBpmKnob),
+    chordPickerKnob: knob(b.chordPickerKnob),
   }
 }

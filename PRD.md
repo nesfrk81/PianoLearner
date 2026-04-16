@@ -6,7 +6,7 @@ This document describes product goals, architecture, subsystem boundaries, and t
 
 ## 1. Product summary
 
-**Piano Learner** is a browser-based practice tool: users load **MIDI files** and see a **staff**, **falling-note waterfall**, and **on-screen keyboard** aligned in time. Audio uses a **soundfont** (acoustic grand). **Web MIDI** drives live notes; optional **MIDI controller bindings** handle transport and looping. Keyboard shortcuts (Space, arrows, Home) control transport only, not piano keys. **Practice modes** (`listen`, `follow`, `wait`) and **A/B loops** support structured practice. The app is a **PWA** and is deployed to **GitHub Pages**.
+**Piano Learner** is a browser-based practice tool: users load **MIDI files** and see a **staff**, **falling-note waterfall**, and **on-screen keyboard** aligned in time. Audio uses a **soundfont** (acoustic grand). **Web MIDI** drives live notes; optional **MIDI controller bindings** handle transport and looping. Keyboard shortcuts (Space, arrows, Home) control transport only, not piano keys. **Practice modes** (`listen`, `follow`, `wait`) and **A/B loops** support structured practice. A **Chord Learning** surface (metronome, chord picker, held-chord detection, exercises, and a 4-module lesson path) runs beside the song UI and works with or without a loaded file. The app is a **PWA** and is deployed to **GitHub Pages**.
 
 **Out of scope:** no backend server, no user accounts, no cloud file sync. All MIDI files and playlist data stay in the browser (IndexedDB / localStorage) unless the user exports or loads files manually.
 
@@ -38,10 +38,12 @@ flowchart LR
   Engine[PlaybackController]
   MidiModel[midiModel_and_playlist_storage]
   Audio[pianoInstrument]
+  Chords[Chord_Learning_subsystem]
   UI --> Hook
   Hook --> Engine
   Hook --> MidiModel
   Hook --> Audio
+  Hook --> Chords
 ```
 
 ---
@@ -62,6 +64,7 @@ Shared domain types (`PracticeMode`, `HandFilter`, `LoopSnap`, `LoopRegion`, `Pa
 | **Audio** | Soundfont loading, note on/off for preview and playback | `src/audio/pianoInstrument.ts` | “Tap to enable audio”, load progress, piano timbre |
 | **Timeline / visualization** | Waterfall, staff canvas, aligned keybed, time ↔ sheet mapping, timeline layout constants | `src/ui/WaterfallPianoRoll.tsx`, `src/ui/StaffCanvas.tsx`, `src/ui/AlignedKeybed.tsx`, `src/ui/MusicTimeline.tsx`, `src/ui/sheetTimeMapping.ts`, `src/ui/pianoKeyLayout.ts`, `src/ui/timelineConstants.ts` | Scrolling notes, seeking, key highlights, sheet/loop overlays |
 | **Settings / mapping UI** | Settings modal (tracks, modes, latency, etc.); MIDI mapping panel | `src/ui/SettingsModal.tsx`, `src/ui/MidiMappingPanel.tsx` | Gear menu, learn/bind UI |
+| **Chord Learning** | Metronome scheduler, chord catalog + pitch-class math + held-chord detection, exercise state machine (chord ladder, circle of fifths, random game), lesson catalog + progress persistence, always-visible practice panel | `src/chords/metronome.ts`, `src/chords/chordModel.ts`, `src/chords/exerciseEngine.ts`, `src/chords/lessonCatalog.ts`, `src/chords/chordUserPreferences.ts`, `src/ui/ChordPracticePanel.tsx` | Chord Practice panel (Free Practice + Lessons tabs), metronome start/stop + BPM, chord picker, live held-chord readout, lesson runner with current + upcoming chord and accuracy scoring |
 
 ---
 
@@ -83,10 +86,22 @@ Use these as traceability anchors when filing or fixing bugs.
 - **Input**
   - Enumerate Web MIDI inputs; display device name when available.
   - Optional hardware bindings for Play, Stop, Record (loop toggle), loop range controls.
+  - Optional chord-practice bindings: metronome start/stop button, BPM knob, chord-picker knob (stored in the same `MidiHardwareBindings` record — see `src/midi/midiHardwareBindings.ts`).
 - **Playlist**
   - Add/remove/reorder items; persist playlist and blobs across sessions.
 - **Audio**
   - Require user gesture before audio starts; show soundfont load progress when applicable.
+- **Chord Learning**
+  - Always-visible Chord Practice panel (works with or without a loaded MIDI file).
+  - Metronome: 10–300 BPM (default 60), single-button start/stop, accent every downbeat; bindable to MIDI CC knob (BPM) and a button (start/stop).
+  - Chord picker (circle of fifths + relative minors, 24 chords) with arrow stepper, select control, and optional CC-knob binding.
+  - Selected chord stays shown until the next one is picked; a mini keyboard diagram highlights the chord tones.
+  - Held chord: pitch-class detection from the currently-pressed MIDI notes (lenient — any octave, extras ignored).
+  - Exercises: **Chord Ladder**, **Circle of Fifths Walk** (forward / backward / minor), **Random Metronome Game** with hit/miss scoring and a missed-chord list after each round.
+  - Lessons (Modules 1–4, Lessons 1.1 – 4.3) with title, intro, instructions, and completion message; next lesson unlocks when the previous one passes its accuracy bar (80% default for Module 4).
+  - Current + upcoming chord are shown during an active exercise; beat position inside the current chord is visualised.
+  - Persistence: default BPM, selected chord index, active lesson id, and per-lesson best-accuracy live in `localStorage` (keys under `pianoLearner.chord.*`).
+  - Playback-rate coupling (Free Practice only): when a MIDI file is loaded and no lesson is active, the chord-practice BPM drives the `PlaybackController`'s `timeScale = bpm / fileBpm`, scaling song playback (and note durations) without altering pitch. Loading a file snaps chord BPM to the file's first tempo event for a 1.00× default; a "Match" chip in the metronome strip resets to native tempo. Active lessons force 1.00× so `lesson.suggestedBpm` doesn't distort playback.
 
 ---
 
@@ -114,6 +129,7 @@ Tag each issue with a **subsystem** so fixes land in the right layer:
 | `audio` | `pianoInstrument.ts` |
 | `ui-timeline` | Waterfall, staff, keybed, `MusicTimeline`, mapping helpers |
 | `settings` | `SettingsModal.tsx`, `MidiMappingPanel.tsx` |
+| `chords` | `src/chords/*`, `ChordPracticePanel.tsx` |
 
 ### Bug table (template)
 

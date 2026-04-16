@@ -274,6 +274,22 @@
   margin-top: 1rem;
 }
 
+.settings-section-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: var(--text-h);
+  letter-spacing: -0.01em;
+  flex-basis: 100%;
+}
+
+/* Stack the chord-practice section's children so the title, toggle and hint
+   don't wrap awkwardly across the flex panel's rows. */
+.settings-chord-section {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
 .settings-modal-hint {
   margin: 0;
   font-size: 0.9rem;
@@ -1015,6 +1031,23 @@
   grid-template-columns: minmax(10rem, 1fr) 1fr auto;
   gap: 0.5rem 0.75rem;
   align-items: center;
+  padding: 0.2rem 0.4rem;
+  margin: 0 -0.4rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.midi-mapping-row--active {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+.midi-mapping-row--active .midi-mapping-label,
+.midi-mapping-row--active .midi-mapping-value {
+  color: var(--text-h);
 }
 
 .midi-mapping-label {
@@ -1045,3 +1078,556 @@
   border-radius: 8px;
   white-space: pre-wrap;
 }
+
+/* ===================== Chord Practice panel ===================== */
+
+.chord-panel {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0.55rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.chord-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.chord-panel-title {
+  margin: 0 auto 0 0;
+  font-size: 1.05rem;
+  color: var(--text-h);
+  letter-spacing: -0.01em;
+}
+
+.chord-tabs {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--code-bg);
+}
+
+.chord-tab {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  padding: 0.4rem 0.85rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.chord-tab--on {
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+.chord-metro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  padding: 0.45rem 0.65rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.chord-metro-toggle {
+  min-width: 4rem;
+}
+
+.chord-bpm-slider {
+  flex: 1 1 10rem;
+  min-width: 10rem;
+}
+
+.chord-metro-toggle--on {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+  color: var(--text-h);
+}
+
+.chord-bpm-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.chord-bpm-num {
+  width: 4rem;
+}
+
+.chord-bpm-slider {
+  accent-color: var(--accent);
+}
+
+.chord-metro-hint {
+  font-size: 0.78rem;
+  flex: 1 1 14rem;
+  margin: 0;
+}
+
+.chord-metro-midi {
+  font-size: 0.78rem;
+  margin-left: auto;
+}
+
+/*
+ * Playback-speed chip — visible in Free Practice when a MIDI file is loaded.
+ * Shows the file's authored BPM and the current playback-rate multiplier
+ * (`chord BPM / file BPM`), with a "Match" button that snaps chord BPM back
+ * to 1.00×.
+ */
+.chord-playback-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-alt, rgba(0, 0, 0, 0.04));
+  font-size: 0.78rem;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.chord-playback-chip-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.chord-playback-chip-bpm {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.chord-playback-chip-sep {
+  opacity: 0.6;
+}
+
+.chord-playback-chip-rate {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.chord-playback-chip-rate--off {
+  color: var(--accent, #e07a00);
+}
+
+.chord-playback-chip-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.chord-playback-chip-btn:hover:not(:disabled) {
+  background: var(--hover, rgba(0, 0, 0, 0.06));
+}
+
+.chord-playback-chip-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Playback-speed chip: yield margin-left:auto to the MIDI indicator if both are present. */
+.chord-metro-midi + .chord-playback-chip {
+  margin-left: 0;
+}
+
+/* --- Free Practice --- */
+
+.chord-free {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.chord-free-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1rem;
+}
+
+.chord-picker-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.chord-picker {
+  padding: 0.35rem 0.45rem;
+  font-size: 0.95rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.chord-picker-step {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.chord-picker-hint {
+  flex: 1;
+  min-width: 14rem;
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+.chord-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  align-items: center;
+}
+
+.chord-hero--lesson {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.8fr) minmax(0, 0.8fr);
+}
+
+.chord-hero-current,
+.chord-hero-next,
+.chord-held {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.chord-hero-label,
+.chord-held-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text);
+}
+
+.chord-hero-name {
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: var(--text-h);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.chord-hero-name--sm {
+  font-size: 1.6rem;
+}
+
+.chord-held-name {
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--text-h);
+  line-height: 1;
+}
+
+.chord-held-name--empty {
+  color: var(--text);
+  opacity: 0.6;
+}
+
+.chord-held-name--match {
+  color: var(--accent);
+}
+
+.chord-held-hint {
+  font-size: 0.78rem;
+}
+
+/* --- Mini keyboard diagram --- */
+
+.chord-mini-kb {
+  display: block;
+  max-width: 12rem;
+  margin-top: 0.15rem;
+}
+
+.chord-mini-kb-w {
+  fill: var(--bg);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.chord-mini-kb-b {
+  fill: var(--text-h);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.chord-mini-kb-w.chord-mini-kb-on {
+  fill: var(--accent-bg);
+  stroke: var(--accent-border);
+}
+
+.chord-mini-kb-b.chord-mini-kb-on {
+  fill: var(--accent);
+  stroke: var(--accent-border);
+}
+
+/* --- Beat dots --- */
+
+.chord-beat-dots {
+  display: inline-flex;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.chord-beat-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: var(--border);
+  display: inline-block;
+  transition: background 80ms ease;
+}
+
+.chord-beat-dot--on {
+  background: var(--accent);
+}
+
+/* --- Lessons list --- */
+
+.chord-lesson-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.chord-lesson-module {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+  background: var(--bg);
+}
+
+.chord-lesson-module-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.chord-lesson-module-title {
+  margin: 0;
+  font-size: 0.98rem;
+  color: var(--text-h);
+}
+
+.chord-lesson-module-goal {
+  font-size: 0.8rem;
+}
+
+.chord-lesson-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.chord-lesson-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: var(--code-bg);
+  border: 1px solid transparent;
+}
+
+.chord-lesson-item--locked {
+  opacity: 0.6;
+}
+
+.chord-lesson-item-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.8rem;
+  min-width: 0;
+}
+
+.chord-lesson-id {
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.chord-lesson-title {
+  font-size: 0.92rem;
+  color: var(--text-h);
+}
+
+.chord-lesson-item-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.chord-lesson-acc {
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.chord-lesson-acc--pass {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* --- Active lesson --- */
+
+.chord-lesson-active {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 0.6rem 1rem;
+  align-items: start;
+}
+
+.chord-lesson-active > .chord-lesson-active-head,
+.chord-lesson-active > .chord-lesson-finish,
+.chord-lesson-active > .chord-lesson-progress {
+  grid-column: 1 / -1;
+}
+
+.chord-lesson-active-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: -0.1rem;
+}
+
+.chord-lesson-active-id {
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  font-size: 0.78rem;
+}
+
+.chord-lesson-active-title {
+  margin: 0.05rem 0 0;
+  font-size: 1.05rem;
+  color: var(--text-h);
+}
+
+.chord-lesson-active-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.chord-hero-next .chord-mini-kb {
+  max-width: 9rem;
+}
+
+.chord-lesson-intro {
+  margin: 0 0 0.25rem;
+  font-size: 0.9rem;
+  color: var(--text-h);
+}
+
+.chord-lesson-instructions {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+}
+
+.chord-lesson-progress {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+
+.chord-lesson-copy {
+  min-width: 0;
+}
+
+.chord-lesson-finish {
+  padding: 1rem;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  background: var(--accent-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.chord-lesson-finish-title {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--text-h);
+}
+
+.chord-lesson-finish-stats,
+.chord-lesson-finish-missed {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.chord-lesson-missed-pill {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  margin: 0 0.2rem 0.15rem 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 0.82rem;
+  color: var(--text-h);
+}
+
+.chord-lesson-finish-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.chord-free-hint {
+  margin: 0;
+}
+
+@media (max-width: 820px) {
+  .chord-lesson-active {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .chord-hero {
+    grid-template-columns: 1fr;
+  }
+  .chord-hero--lesson {
+    grid-template-columns: 1fr;
+  }
+}
+

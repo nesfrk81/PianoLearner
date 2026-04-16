@@ -9,6 +9,7 @@ import { usePianoLearner } from './hooks/usePianoLearner'
 import { MidiMappingPanel } from './ui/MidiMappingPanel'
 import { SettingsModal } from './ui/SettingsModal'
 import { MusicTimeline } from './ui/MusicTimeline'
+import { ChordPracticePanel } from './ui/ChordPracticePanel'
 import {
   KEYBED_KEY_OPTIONS,
   loadKeybedKeyCount,
@@ -527,6 +528,24 @@ export default function App() {
     midiActivityLog,
     clearMidiActivityLog,
     resetMidiHardwareBindings,
+    activeBindingFields,
+    bpm,
+    setBpm,
+    fileBpm,
+    metronomeRunning,
+    toggleMetronome,
+    selectedChordIndex,
+    setSelectedChordIndex,
+    selectedChord,
+    heldChord,
+    activeLessonId,
+    exerciseSnapshot,
+    lessonProgress,
+    startLesson,
+    exitLesson,
+    restartLesson,
+    previewNextChord,
+    setPreviewNextChord,
   } = pl
 
   useEffect(() => {
@@ -860,6 +879,27 @@ export default function App() {
             </label>
           </section>
 
+          <section
+            className="panel settings-modal-section settings-chord-section"
+            aria-label="Chord practice"
+          >
+            <h4 className="settings-section-title">Chord practice</h4>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={previewNextChord}
+                onChange={(e) =>
+                  setPreviewNextChord(e.currentTarget.checked)
+                }
+              />
+              <span>Preview next chord</span>
+            </label>
+            <p className="muted settings-modal-hint">
+              During a lesson, also show the upcoming chord's notes on the
+              mini keyboard under the "Next" label — not just the chord name.
+            </p>
+          </section>
+
           {midi ? (
             <>
               <section className="panel grid settings-modal-section">
@@ -883,6 +923,7 @@ export default function App() {
                 activityLog={midiActivityLog}
                 onClearLog={clearMidiActivityLog}
                 onResetBindings={resetMidiHardwareBindings}
+                activeBindingFields={activeBindingFields}
               />
             </>
           ) : (
@@ -892,6 +933,32 @@ export default function App() {
             </p>
           )}
         </SettingsModal>
+      )}
+
+      {playlistHydrated && (
+        <ChordPracticePanel
+          audioReady={audioReady}
+          onEnableAudio={() => {
+            void ensureAudio()
+          }}
+          bpm={bpm}
+          setBpm={setBpm}
+          fileBpm={fileBpm}
+          metronomeRunning={metronomeRunning}
+          toggleMetronome={toggleMetronome}
+          selectedChordIndex={selectedChordIndex}
+          setSelectedChordIndex={setSelectedChordIndex}
+          selectedChord={selectedChord}
+          heldChord={heldChord}
+          activeLessonId={activeLessonId}
+          exerciseSnapshot={exerciseSnapshot}
+          lessonProgress={lessonProgress}
+          startLesson={startLesson}
+          exitLesson={exitLesson}
+          restartLesson={restartLesson}
+          previewNextChord={previewNextChord}
+          midiConnected={midiConnected}
+        />
       )}
 
       {midi && (

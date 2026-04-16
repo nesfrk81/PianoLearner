@@ -18,6 +18,7 @@ import { PlaybackController } from '../engine/playbackController'
 import {
   buildCcTrigger,
   defaultMidiHardwareBindings,
+  findMatchingBindingFields,
   isCcMessage,
   isTriggerLearnMode,
   learnFromMessage,
@@ -46,7 +47,7 @@ import {
   loadMidiVelocitySensitivity,
   saveMidiVelocitySensitivity,
 } from '../midi/midiUserPreferences'
-import type { HandFilter, PracticeMode } from '../types'
+import type { ChordSpec, HandFilter, LessonId, PracticeMode } from '../types'
 import {
   ccToTimeIndex,
   endAtOrAfter,
@@ -54,6 +55,32 @@ import {
   uniqueEnds,
   uniqueOnsets,
 } from '../engine/loopSnap'
+import {
+  MAX_BPM,
+  Metronome,
+  MIN_BPM,
+} from '../chords/metronome'
+import { ExerciseEngine, type ExerciseSnapshot } from '../chords/exerciseEngine'
+import {
+  chordMidiNotes,
+  COMMON_CHORDS,
+  detectChordFromHeld,
+  type DetectedChord,
+} from '../chords/chordModel'
+import { lessonById } from '../chords/lessonCatalog'
+import {
+  loadActiveLessonId,
+  loadBpm,
+  loadLessonProgress,
+  loadPreviewNextChord,
+  loadSelectedChordIndex,
+  saveActiveLessonId,
+  saveBpm,
+  saveLessonProgress,
+  savePreviewNextChord,
+  saveSelectedChordIndex,
+  type LessonProgressMap,
+} from '../chords/chordUserPreferences'
 
 /** Fixed wall-clock step for ←/→ (musical beat length varies with tempo and confuses scrubbing). */
 const ARROW_NUDGE_SEC = 0.5
@@ -120,6 +147,19 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     useState<MidiHardwareBindings>(() => loadMidiHardwareBindings())
   const [midiLearnMode, setMidiLearnMode] = useState<MidiLearnMode | null>(null)
   const [midiActivityLog, setMidiActivityLog] = useState<string[]>([])
+  /**
+   * Binding fields whose MIDI source was just touched (press/release, or a
+   * knob that is currently moving). Used by the MIDI mapping UI to flash the
+   * row so the user can see what the key/knob they pressed is already bound
+   * to. Auto-clears after a short idle window per field — see the per-field
+   * timers on {@link activeBindingTimersRef} below.
+   */
+  const [activeBindingFields, setActiveBindingFields] = useState<
+    ReadonlySet<keyof MidiHardwareBindings>
+  >(() => new Set())
+  const activeBindingTimersRef = useRef<
+    Partial<Record<keyof MidiHardwareBindings, ReturnType<typeof setTimeout>>>
+  >({})
 
   const bindingsRef = useRef(midiHardwareBindings)
   const midiLearnModeRef = useRef(midiLearnMode)
@@ -152,6 +192,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     loopEnd: false,
     loopShift: false,
     trackFocus: false,
+    metronomeBpm: false,
+    chordPicker: false,
   })
   /** Which MIDI file track index the hardware “track toggle” acts on (tracks with notes only). */
   const trackFocusRef = useRef<number | null>(null)
@@ -186,6 +228,75 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   )
   const [waitExpectedMidi, setWaitExpectedMidi] = useState<Set<number> | null>(null)
 
+  const userPressedMidiRef = useRef(userPressedMidi)
+  useLayoutEffect(() => {
+    userPressedMidiRef.current = userPressedMidi
+  }, [userPressedMidi])
+
+  /* ---------------- Chord Learning state ---------------- */
+  const metronomeRef = useRef<Metronome | null>(null)
+  const exerciseRef = useRef<ExerciseEngine | null>(null)
+  const [bpm, setBpmState] = useState<number>(() => loadBpm())
+  const [metronomeRunning, setMetronomeRunning] = useState(false)
+  const [selectedChordIndex, setSelectedChordIndexState] = useState<number>(
+    () => loadSelectedChordIndex(),
+  )
+  const [activeLessonId, setActiveLessonIdState] = useState<LessonId | null>(
+    () => loadActiveLessonId(),
+  )
+  const [exerciseSnapshot, setExerciseSnapshot] =
+    useState<ExerciseSnapshot | null>(null)
+  const [lessonProgress, setLessonProgress] = useState<LessonProgressMap>(
+    () => loadLessonProgress(),
+  )
+  /**
+   * "Preview next chord" — when on, the lesson hero also renders the mini
+   * piano under the "Next" label, not just the chord name. Exposed here so
+   * the Settings modal (canonical toggle) and the Chord panel read the same
+   * value. Persisted; defaults to on for new users.
+   */
+  const [previewNextChord, setPreviewNextChordState] = useState<boolean>(
+    () => loadPreviewNextChord(),
+  )
+
+  const bpmRef = useRef(bpm)
+  useLayoutEffect(() => {
+    bpmRef.current = bpm
+  }, [bpm])
+
+  const selectedChord: ChordSpec =
+    COMMON_CHORDS[selectedChordIndex % COMMON_CHORDS.length] ??
+    COMMON_CHORDS[0]!
+
+  const heldChord = useMemo<DetectedChord | null>(
+    () => detectChordFromHeld(userPressedMidi),
+    [userPressedMidi],
+  )
+
+  /**
+   * Keyboard notes to highlight as "expected" for chord practice. The panel
+   * surfaces this to `AlignedKeybed` via `expectedMidi` (same channel the song
+   * mode uses). Returns an empty set when neither a chord is selected nor an
+   * exercise is running.
+   */
+  const chordExpectedMidi = useMemo<Set<number>>(() => {
+    if (exerciseSnapshot?.current) {
+      return new Set(
+        chordMidiNotes(
+          exerciseSnapshot.current.root,
+          exerciseSnapshot.current.quality,
+          exerciseSnapshot.currentOctave,
+        ),
+      )
+    }
+    if (!activeLessonId) {
+      return new Set(
+        chordMidiNotes(selectedChord.root, selectedChord.quality, 4),
+      )
+    }
+    return new Set<number>()
+  }, [exerciseSnapshot, activeLessonId, selectedChord])
+
   const ensureAudio = useCallback(async () => {
     if (!ctxRef.current) {
       ctxRef.current = new AudioContext()
@@ -210,6 +321,23 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         resetPianoInstrumentCache()
         throw e
       }
+    }
+    if (!metronomeRef.current) {
+      const m = new Metronome(ctx)
+      m.setBpm(bpmRef.current)
+      m.onBeat(() => {
+        const eng = exerciseRef.current
+        if (eng) {
+          eng.observeHeld(userPressedMidiRef.current)
+          const snap = eng.beat()
+          setExerciseSnapshot(snap)
+          if (snap.finished) {
+            metronomeRef.current?.stop()
+            setMetronomeRunning(false)
+          }
+        }
+      })
+      metronomeRef.current = m
     }
     setAudioReady(true)
     return ctx
@@ -278,6 +406,19 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   const noteOnsets = useMemo(() => uniqueOnsets(playbackNotes), [playbackNotes])
   const noteEnds = useMemo(() => uniqueEnds(playbackNotes), [playbackNotes])
 
+  /**
+   * Starting BPM declared in the MIDI file's first tempo event. Used as the
+   * baseline for playback-rate scaling in Free Practice: the controller's
+   * `timeScale = chordBpm / fileBpm`, so setting the chord BPM to this value
+   * gives native 1.00× playback. `null` when no file is loaded or the file
+   * has no tempo metadata.
+   */
+  const fileBpm = useMemo<number | null>(() => {
+    if (!midi) return null
+    const t = midi.header.tempos?.[0]?.bpm
+    return typeof t === 'number' && Number.isFinite(t) && t > 0 ? t : 120
+  }, [midi])
+
   useLayoutEffect(() => {
     noteOnsetsRef.current = noteOnsets
     noteEndsRef.current = noteEnds
@@ -305,6 +446,22 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       const m = new Midi(buf)
       setFileName(name)
       setMidi(m)
+      /* Pick up the file's starting BPM so Free Practice uses it as the
+         playback baseline (1.00× speed at that tempo). Skip if a lesson is
+         active — lessons own their own BPM via `suggestedBpm`. */
+      const firstTempo = m.header.tempos?.[0]?.bpm
+      if (
+        typeof firstTempo === 'number' &&
+        Number.isFinite(firstTempo) &&
+        activeLessonIdRef.current == null
+      ) {
+        const clamped = Math.max(
+          MIN_BPM,
+          Math.min(MAX_BPM, Math.round(firstTempo)),
+        )
+        setBpmState(clamped)
+        metronomeRef.current?.setBpm(clamped)
+      }
       const summaries = trackSummaries(m)
       const firstWithNotes = summaries.find((s) => s.noteCount > 0)?.index ?? 0
       setSelectedTrackIndicesState([firstWithNotes])
@@ -326,6 +483,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
           loopEnd: false,
           loopShift: false,
           trackFocus: false,
+          metronomeBpm: knobPickedUp.current.metronomeBpm,
+          chordPicker: knobPickedUp.current.chordPicker,
         }
         setWaitExpectedMidi(null)
       }
@@ -432,6 +591,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
             loopEnd: false,
             loopShift: false,
             trackFocus: false,
+            metronomeBpm: knobPickedUp.current.metronomeBpm,
+            chordPicker: knobPickedUp.current.chordPicker,
           }
         }
       }
@@ -461,6 +622,35 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   const prevPlaylistSongRef = useRef(previousPlaylistSong)
   nextPlaylistSongRef.current = nextPlaylistSong
   prevPlaylistSongRef.current = previousPlaylistSong
+
+  const activeLessonIdRef = useRef(activeLessonId)
+  const selectedChordIndexRef = useRef(selectedChordIndex)
+  useLayoutEffect(() => {
+    activeLessonIdRef.current = activeLessonId
+    selectedChordIndexRef.current = selectedChordIndex
+  }, [activeLessonId, selectedChordIndex])
+
+  /**
+   * In Free Practice (no lesson active), the chord-practice BPM drives the
+   * playback rate of the loaded MIDI file: `timeScale = bpm / fileBpm`. When
+   * a lesson is active we force 1.00× so lesson BPMs don't distort song
+   * playback. `audioReady` is in the deps so we also push an initial rate
+   * right after the controller is created.
+   */
+  useEffect(() => {
+    const ctl = controllerRef.current
+    if (!ctl) return
+    const scale =
+      activeLessonId == null && fileBpm != null && fileBpm > 0
+        ? bpm / fileBpm
+        : 1
+    ctl.setTimeScale(scale)
+  }, [bpm, fileBpm, activeLessonId, audioReady])
+
+  /** Forward refs for chord callbacks consumed inside the long-lived MIDI `onMsg`. */
+  const toggleMetronomeRef = useRef<() => void | Promise<void>>(() => {})
+  const setBpmRef = useRef<(n: number) => void>(() => {})
+  const setSelectedChordIndexRef = useRef<(i: number) => void>(() => {})
 
   useEffect(() => {
     let cancelled = false
@@ -597,6 +787,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         loopEnd: false,
         loopShift: false,
         trackFocus: knobPickedUp.current.trackFocus,
+        metronomeBpm: knobPickedUp.current.metronomeBpm,
+        chordPicker: knobPickedUp.current.chordPicker,
       }
     },
     [setLoopA, setLoopB, setLoopEnabled],
@@ -614,6 +806,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       loopEnd: false,
       loopShift: false,
       trackFocus: false,
+      metronomeBpm: knobPickedUp.current.metronomeBpm,
+      chordPicker: knobPickedUp.current.chordPicker,
     }
     onLoopCleared?.()
   }, [onLoopCleared])
@@ -648,6 +842,154 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
 
   const resetMidiHardwareBindings = useCallback(() => {
     setMidiHardwareBindings({ ...defaultMidiHardwareBindings })
+  }, [])
+
+  useEffect(() => {
+    const timers = activeBindingTimersRef.current
+    return () => {
+      for (const t of Object.values(timers)) {
+        if (t != null) clearTimeout(t)
+      }
+    }
+  }, [])
+
+  /* ---------------- Chord Learning API ---------------- */
+
+  const setBpm = useCallback((value: number) => {
+    const clamped = Math.max(MIN_BPM, Math.min(MAX_BPM, Math.round(value)))
+    setBpmState(clamped)
+    metronomeRef.current?.setBpm(clamped)
+  }, [])
+
+  useEffect(() => {
+    saveBpm(bpm)
+  }, [bpm])
+
+  useEffect(() => {
+    saveSelectedChordIndex(selectedChordIndex)
+  }, [selectedChordIndex])
+
+  useEffect(() => {
+    saveActiveLessonId(activeLessonId)
+  }, [activeLessonId])
+
+  useEffect(() => {
+    saveLessonProgress(lessonProgress)
+  }, [lessonProgress])
+
+  const setPreviewNextChord = useCallback((value: boolean) => {
+    setPreviewNextChordState(value)
+    savePreviewNextChord(value)
+  }, [])
+
+  const setSelectedChordIndex = useCallback((index: number) => {
+    const len = COMMON_CHORDS.length
+    const next = ((index % len) + len) % len
+    setSelectedChordIndexState(next)
+  }, [])
+
+  const startMetronome = useCallback(async () => {
+    await ensureAudio()
+    metronomeRef.current?.setBpm(bpmRef.current)
+    metronomeRef.current?.start()
+    setMetronomeRunning(true)
+  }, [ensureAudio])
+
+  const stopMetronome = useCallback(() => {
+    metronomeRef.current?.stop()
+    setMetronomeRunning(false)
+  }, [])
+
+  const startLesson = useCallback(
+    async (id: LessonId) => {
+      const lesson = lessonById(id)
+      if (!lesson) return
+      await ensureAudio()
+      exerciseRef.current = new ExerciseEngine(lesson.exercise)
+      setExerciseSnapshot(exerciseRef.current.snapshot())
+      setActiveLessonIdState(id)
+      setBpm(lesson.suggestedBpm)
+    },
+    [ensureAudio, setBpm],
+  )
+
+  const exitLesson = useCallback(() => {
+    stopMetronome()
+    exerciseRef.current = null
+    setExerciseSnapshot(null)
+    setActiveLessonIdState(null)
+  }, [stopMetronome])
+
+  const restartLesson = useCallback(() => {
+    const id = activeLessonId
+    if (!id) return
+    const lesson = lessonById(id)
+    if (!lesson) return
+    stopMetronome()
+    exerciseRef.current = new ExerciseEngine(lesson.exercise)
+    setExerciseSnapshot(exerciseRef.current.snapshot())
+  }, [activeLessonId, stopMetronome])
+
+  /**
+   * Smart Start/Stop — used by the on-screen Start button, the MIDI-bound
+   * metronome key, and any future surfaces. Order of checks:
+   *   1) Metronome is running → stop it.
+   *   2) Metronome is stopped AND an active lesson just finished → reset the
+   *      exercise engine back to its first chord, but leave the metronome
+   *      stopped. The user is now looking at a fresh lesson view; a second
+   *      press actually starts the round.
+   *   3) Otherwise → start the metronome.
+   *
+   * Reading `exerciseRef.current?.snapshot().finished` instead of the React
+   * `exerciseSnapshot` state keeps this callback stable (no dep churn on
+   * every beat) while still observing the engine's current state.
+   */
+  const toggleMetronome = useCallback(async () => {
+    if (metronomeRef.current?.running) {
+      stopMetronome()
+      return
+    }
+    const snap = exerciseRef.current?.snapshot()
+    if (snap?.finished && activeLessonIdRef.current) {
+      restartLesson()
+      return
+    }
+    await startMetronome()
+  }, [restartLesson, startMetronome, stopMetronome])
+
+  /** Record best-seen accuracy when an exercise finishes. */
+  useEffect(() => {
+    if (!exerciseSnapshot?.finished || !activeLessonId) return
+    setLessonProgress((prev) => {
+      const prior = prev[activeLessonId]?.accuracy ?? 0
+      if (exerciseSnapshot.accuracy <= prior) return prev
+      return {
+        ...prev,
+        [activeLessonId]: {
+          accuracy: exerciseSnapshot.accuracy,
+          updatedAt: Date.now(),
+        },
+      }
+    })
+  }, [exerciseSnapshot?.finished, exerciseSnapshot?.accuracy, activeLessonId])
+
+  useLayoutEffect(() => {
+    toggleMetronomeRef.current = toggleMetronome
+    setBpmRef.current = setBpm
+    setSelectedChordIndexRef.current = setSelectedChordIndex
+  }, [toggleMetronome, setBpm, setSelectedChordIndex])
+
+  /* Feed held chord into the running exercise so hits can be detected between beats. */
+  useEffect(() => {
+    exerciseRef.current?.observeHeld(userPressedMidi)
+  }, [userPressedMidi])
+
+  /* Tear down the metronome when the hook unmounts (audio context closes too). */
+  useEffect(() => {
+    return () => {
+      metronomeRef.current?.dispose()
+      metronomeRef.current = null
+    }
   }, [])
 
   useEffect(() => {
@@ -807,6 +1149,40 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         setMidiActivityLog((prev) => [line, ...prev].slice(0, 48))
       }
 
+      /* Light up the mapping row for any binding this message matches. Works
+         whether or not a learn is in progress, so the user always sees what
+         the key / knob they just touched is currently bound to. */
+      const matchedFields = findMatchingBindingFields(
+        bindingsRef.current,
+        data,
+      )
+      if (matchedFields.length > 0) {
+        setActiveBindingFields((prev) => {
+          let changed = false
+          const next = new Set(prev)
+          for (const f of matchedFields) {
+            if (!next.has(f)) {
+              next.add(f)
+              changed = true
+            }
+          }
+          return changed ? next : prev
+        })
+        for (const f of matchedFields) {
+          const existing = activeBindingTimersRef.current[f]
+          if (existing != null) clearTimeout(existing)
+          activeBindingTimersRef.current[f] = setTimeout(() => {
+            delete activeBindingTimersRef.current[f]
+            setActiveBindingFields((prev) => {
+              if (!prev.has(f)) return prev
+              const nextSet = new Set(prev)
+              nextSet.delete(f)
+              return nextSet
+            })
+          }, 900)
+        }
+      }
+
       const learnMode = midiLearnModeRef.current
       if (learnMode) {
         if (isTriggerLearnMode(learnMode) && isCcMessage(data)) {
@@ -921,6 +1297,13 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         void prevPlaylistSongRef.current()
         return
       }
+      if (
+        bind.metronomeToggle &&
+        matchesHardwareButtonTrigger(bind.metronomeToggle, data)
+      ) {
+        void toggleMetronomeRef.current()
+        return
+      }
 
       const loopTrig = bind.loopAtPlayhead
       if (loopTrig && matchesHardwareButtonTrigger(loopTrig, data)) {
@@ -944,6 +1327,38 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
 
       if ((st & 0xf0) === 0xb0 && data.length >= 3) {
         const v = data[2] ?? 0
+        if (bind.metronomeBpmKnob && matchesCcControl(bind.metronomeBpmKnob, data)) {
+          const targetBpm = Math.round(
+            MIN_BPM + (v / 127) * (MAX_BPM - MIN_BPM),
+          )
+          const pu = knobPickedUp.current
+          const PICKUP_THRESH = 3
+          const currentCc = Math.round(
+            ((bpmRef.current - MIN_BPM) / (MAX_BPM - MIN_BPM)) * 127,
+          )
+          if (!pu.metronomeBpm) {
+            if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.metronomeBpm = true
+            else return
+          }
+          setBpmRef.current(targetBpm)
+          return
+        }
+        if (bind.chordPickerKnob && matchesCcControl(bind.chordPickerKnob, data)) {
+          if (activeLessonIdRef.current != null) return
+          const n = COMMON_CHORDS.length
+          const pu = knobPickedUp.current
+          const PICKUP_THRESH = 3
+          const currentCc = Math.round(
+            (selectedChordIndexRef.current / Math.max(1, n - 1)) * 127,
+          )
+          if (!pu.chordPicker) {
+            if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.chordPicker = true
+            else return
+          }
+          const slot = Math.min(n - 1, Math.round((v / 127) * (n - 1)))
+          setSelectedChordIndexRef.current(slot)
+          return
+        }
         if (bind.trackFocusKnob && matchesCcControl(bind.trackFocusKnob, data)) {
           if (!midi) return
           const selectable = trackSummaries(midi)
@@ -1172,5 +1587,27 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     midiActivityLog,
     clearMidiActivityLog,
     resetMidiHardwareBindings,
+    activeBindingFields,
+    /* Chord Learning */
+    bpm,
+    setBpm,
+    fileBpm,
+    metronomeRunning,
+    toggleMetronome,
+    startMetronome,
+    stopMetronome,
+    selectedChordIndex,
+    setSelectedChordIndex,
+    selectedChord,
+    heldChord,
+    chordExpectedMidi,
+    activeLessonId,
+    exerciseSnapshot,
+    startLesson,
+    exitLesson,
+    restartLesson,
+    lessonProgress,
+    previewNextChord,
+    setPreviewNextChord,
   }
 }
