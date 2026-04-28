@@ -8,6 +8,17 @@ import { groupNotesByOnset, type OnsetGroup } from './onsetGroups'
 const SCHEDULE_AHEAD = 0.28
 const EPS = 0.025
 
+function lowerBoundNoteTime(notes: NoteView[], targetSec: number): number {
+  let lo = 0
+  let hi = notes.length
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    if (notes[mid]!.time < targetSec) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
 export class PlaybackController {
   midi: Midi | null = null
   selectedTrackIndices: number[] = [0]
@@ -33,6 +44,8 @@ export class PlaybackController {
   waiting = false
   private waitHits = new Set<number>()
   private practiceNoteIds = new Set<string>()
+  private playbackNotes: NoteView[] = []
+  private accompanimentNotes: NoteView[] = []
 
   loop: { a: number; b: number } | null = null
 
@@ -99,23 +112,26 @@ export class PlaybackController {
     if (!this.midi || this.selectedTrackIndices.length === 0) {
       this.onsetGroups = []
       this.practiceNoteIds = new Set()
+      this.playbackNotes = []
+      this.accompanimentNotes = []
       return
     }
     const raw = notesForTracks(this.midi, this.selectedTrackIndices)
     this.practiceNoteIds = new Set(raw.map((n) => n.id))
     const notes = this.filterByHand(raw)
+    this.playbackNotes = notes
+    this.accompanimentNotes = allNotesFlat(this.midi).filter(
+      (n) => !this.practiceNoteIds.has(n.id),
+    )
     this.onsetGroups = groupNotesByOnset(notes)
   }
 
   getPlaybackNotes(): NoteView[] {
-    if (!this.midi) return []
-    const raw = notesForTracks(this.midi, this.selectedTrackIndices)
-    return this.filterByHand(raw)
+    return this.playbackNotes
   }
 
   private getAccompanimentNotes(): NoteView[] {
-    if (!this.midi) return []
-    return allNotesFlat(this.midi).filter((n) => !this.practiceNoteIds.has(n.id))
+    return this.accompanimentNotes
   }
 
   getSongTime(): number {
@@ -266,8 +282,9 @@ export class PlaybackController {
     if (piano) {
       const now = this.ctx.currentTime
       const ts = this.timeScale
+      const notes = this.getPlaybackNotes()
       for (const m of g.mids) {
-        const n = this.getPlaybackNotes().find(
+        const n = notes.find(
           (x) => Math.abs(x.time - g.time) < EPS && x.midi === m,
         )
         const duration = (n?.duration ?? 0.4) / ts
@@ -308,9 +325,11 @@ export class PlaybackController {
     const cap = untilExclusive ?? songTime + SCHEDULE_AHEAD * this.timeScale
     const notes = notesOverride ?? this.getPlaybackNotes()
     const ts = this.timeScale
-    for (const n of notes) {
+    const start = lowerBoundNoteTime(notes, songTime - 0.02)
+    for (let i = start; i < notes.length; i += 1) {
+      const n = notes[i]!
       if (n.time < songTime - 0.02) continue
-      if (n.time >= cap) continue
+      if (n.time >= cap) break
       if (this.scheduled.has(n.id)) continue
       this.scheduled.add(n.id)
       const delaySong = n.time - songTime

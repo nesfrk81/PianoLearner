@@ -7,9 +7,11 @@ type Props = {
   notes: NoteView[]
   duration: number
   songTime: number
+  getSongTime: () => number
   minPitch: number
   maxPitch: number
   splitMidi: number
+  playing: boolean
   loopEnabled: boolean
   loopA: number
   loopB: number
@@ -28,9 +30,11 @@ export function MusicTimeline({
   notes,
   duration,
   songTime,
+  getSongTime,
   minPitch,
   maxPitch,
   splitMidi,
+  playing,
   loopEnabled,
   loopA,
   loopB,
@@ -50,7 +54,9 @@ export function MusicTimeline({
         notes={notes}
         duration={duration}
         songTime={songTime}
+        getSongTime={getSongTime}
         splitMidi={splitMidi}
+        playing={playing}
         loopEnabled={loopEnabled}
         loopA={loopA}
         loopB={loopB}
@@ -64,6 +70,8 @@ export function MusicTimeline({
         notes={notes}
         duration={duration}
         songTime={songTime}
+        getSongTime={getSongTime}
+        playing={playing}
         minPitch={minPitch}
         maxPitch={maxPitch}
         onSeek={onSeek}

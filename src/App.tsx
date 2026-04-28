@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -22,9 +23,20 @@ import './App.css'
 function expectedMidiNow(
   notes: { time: number; duration: number; midi: number }[],
   t: number,
+  maxDuration: number,
 ): Set<number> {
   const s = new Set<number>()
-  for (const n of notes) {
+  let lo = 0
+  let hi = notes.length
+  const startSec = Math.max(0, t - maxDuration - 0.05)
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    if (notes[mid]!.time < startSec) lo = mid + 1
+    else hi = mid
+  }
+  for (let i = lo; i < notes.length; i += 1) {
+    const n = notes[i]!
+    if (n.time > t + 0.05) break
     if (t >= n.time - 0.05 && t <= n.time + n.duration) s.add(n.midi)
   }
   return s
@@ -322,11 +334,15 @@ function PracticeTracksDropdown({
   }, [open])
 
   useEffect(() => {
-    if (midiTrackDropdownBump > 0) setOpen(true)
+    if (midiTrackDropdownBump <= 0) return
+    const id = requestAnimationFrame(() => setOpen(true))
+    return () => cancelAnimationFrame(id)
   }, [midiTrackDropdownBump])
 
   useEffect(() => {
-    if (playing) setOpen(false)
+    if (!playing) return
+    const id = requestAnimationFrame(() => setOpen(false))
+    return () => cancelAnimationFrame(id)
   }, [playing])
 
   useEffect(() => {
@@ -469,7 +485,9 @@ export default function App() {
   const [loopSheetOverlay, setLoopSheetOverlay] = useState(false)
   const closeLoopSheetOverlay = useCallback(() => setLoopSheetOverlay(false), [])
   const keyboardTransportBlockedRef = useRef(false)
-  keyboardTransportBlockedRef.current = settingsOpen
+  useLayoutEffect(() => {
+    keyboardTransportBlockedRef.current = settingsOpen
+  }, [settingsOpen])
   const pl = usePianoLearner({
     onLoopCleared: closeLoopSheetOverlay,
     onLoopAtPlayhead: () => setLoopSheetOverlay(true),
@@ -494,6 +512,7 @@ export default function App() {
     togglePlay,
     pausePlayback,
     songTime,
+    getLiveSongTime,
     seek,
     jumpToStart,
     handFilter,
@@ -556,11 +575,20 @@ export default function App() {
     () => midiRangeForKeyCount(keybedKeyCount),
     [keybedKeyCount],
   )
+  const maxPlaybackNoteDuration = useMemo(
+    () => playbackNotes.reduce((max, n) => Math.max(max, n.duration), 0),
+    [playbackNotes],
+  )
 
   const expectedMidi = useMemo(
     () =>
-      waitExpectedMidi ?? expectedMidiNow(playbackNotes, songTime - latencyMs / 1000),
-    [waitExpectedMidi, playbackNotes, songTime, latencyMs],
+      waitExpectedMidi ??
+      expectedMidiNow(
+        playbackNotes,
+        songTime - latencyMs / 1000,
+        maxPlaybackNoteDuration,
+      ),
+    [waitExpectedMidi, playbackNotes, songTime, latencyMs, maxPlaybackNoteDuration],
   )
 
   const duration = midi?.duration ?? 0
@@ -572,6 +600,9 @@ export default function App() {
     },
     [initLoopAtCenter],
   )
+  const enableAudioFromPanel = useCallback(() => {
+    void ensureAudio()
+  }, [ensureAudio])
 
   const onLoopBoundsChange = useCallback(
     (a: number, b: number) => {
@@ -938,9 +969,7 @@ export default function App() {
       {playlistHydrated && (
         <ChordPracticePanel
           audioReady={audioReady}
-          onEnableAudio={() => {
-            void ensureAudio()
-          }}
+          onEnableAudio={enableAudioFromPanel}
           bpm={bpm}
           setBpm={setBpm}
           fileBpm={fileBpm}
@@ -1043,9 +1072,11 @@ export default function App() {
               notes={playbackNotes}
               duration={duration}
               songTime={songTime}
+              getSongTime={getLiveSongTime}
               minPitch={keybedMinMidi}
               maxPitch={keybedMaxMidi}
               splitMidi={splitMidi}
+              playing={playing}
               loopEnabled={loopEnabled}
               loopA={loopA}
               loopB={loopB}

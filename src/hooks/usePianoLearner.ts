@@ -84,6 +84,8 @@ import {
 
 /** Fixed wall-clock step for ←/→ (musical beat length varies with tempo and confuses scrubbing). */
 const ARROW_NUDGE_SEC = 0.5
+const PRACTICE_MODES: PracticeMode[] = ['listen', 'follow', 'wait']
+const HAND_FILTERS: HandFilter[] = ['both', 'right', 'left']
 
 function sameTrackIndexList(a: number[], b: number[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i])
@@ -112,6 +114,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     new Map(),
   )
   const rafRef = useRef<number>(0)
+  const lastReactTimeUpdateRef = useRef(0)
 
   const [audioReady, setAudioReady] = useState(false)
   const [sfLoadTotal, setSfLoadTotal] = useState(0)
@@ -279,13 +282,15 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
    * mode uses). Returns an empty set when neither a chord is selected nor an
    * exercise is running.
    */
+  const exerciseCurrent = exerciseSnapshot?.current
+  const exerciseCurrentOctave = exerciseSnapshot?.currentOctave
   const chordExpectedMidi = useMemo<Set<number>>(() => {
-    if (exerciseSnapshot?.current) {
+    if (exerciseCurrent) {
       return new Set(
         chordMidiNotes(
-          exerciseSnapshot.current.root,
-          exerciseSnapshot.current.quality,
-          exerciseSnapshot.currentOctave,
+          exerciseCurrent.root,
+          exerciseCurrent.quality,
+          exerciseCurrentOctave,
         ),
       )
     }
@@ -295,7 +300,13 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       )
     }
     return new Set<number>()
-  }, [exerciseSnapshot, activeLessonId, selectedChord])
+  }, [
+    exerciseCurrent,
+    exerciseCurrentOctave,
+    activeLessonId,
+    selectedChord.root,
+    selectedChord.quality,
+  ])
 
   const ensureAudio = useCallback(async () => {
     if (!ctxRef.current) {
@@ -366,17 +377,18 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
 
   useEffect(() => {
     if (!midi) return
-    setSelectedTrackIndicesState((prev) => {
+    const id = requestAnimationFrame(() => setSelectedTrackIndicesState((prev) => {
       const next = normalizeTrackIndices(midi, prev)
       return sameTrackIndexList(next, prev) ? prev : next
-    })
+    }))
+    return () => cancelAnimationFrame(id)
   }, [midi])
 
   useEffect(() => {
     if (!midi) {
       trackFocusRef.current = null
-      setMidiTrackFocusIndex(null)
-      return
+      const id = requestAnimationFrame(() => setMidiTrackFocusIndex(null))
+      return () => cancelAnimationFrame(id)
     }
     const selectable = trackSummaries(midi)
       .filter((s) => s.noteCount > 0)
@@ -384,14 +396,16 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       .sort((a, b) => a - b)
     if (selectable.length === 0) {
       trackFocusRef.current = null
-      setMidiTrackFocusIndex(null)
-      return
+      const id = requestAnimationFrame(() => setMidiTrackFocusIndex(null))
+      return () => cancelAnimationFrame(id)
     }
     const cur = trackFocusRef.current
     if (cur == null || !selectable.includes(cur)) {
       trackFocusRef.current = selectable[0]
     }
-    setMidiTrackFocusIndex(trackFocusRef.current)
+    const nextFocus = trackFocusRef.current
+    const id = requestAnimationFrame(() => setMidiTrackFocusIndex(nextFocus))
+    return () => cancelAnimationFrame(id)
   }, [midi])
 
   const playbackNotes = useMemo(() => {
@@ -453,7 +467,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       if (
         typeof firstTempo === 'number' &&
         Number.isFinite(firstTempo) &&
-        activeLessonIdRef.current == null
+        activeLessonId == null
       ) {
         const clamped = Math.max(
           MIN_BPM,
@@ -489,11 +503,13 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         setWaitExpectedMidi(null)
       }
     },
-    [ensureAudio, mode, onLoopCleared],
+    [activeLessonId, ensureAudio, mode, onLoopCleared],
   )
 
   const applyMidiFromBufferRef = useRef(applyMidiFromBuffer)
-  applyMidiFromBufferRef.current = applyMidiFromBuffer
+  useLayoutEffect(() => {
+    applyMidiFromBufferRef.current = applyMidiFromBuffer
+  }, [applyMidiFromBuffer])
 
   const newMidiId = () =>
     typeof crypto !== 'undefined' && crypto.randomUUID
@@ -506,7 +522,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       const list = Array.from(files).filter((f) => /\.(mid|midi)$/i.test(f.name))
       if (list.length === 0) return
       await ensureAudio()
-      let ids = [...loadPlaylistPersist().ids]
+      const ids = [...loadPlaylistPersist().ids]
       const appended: { id: string; name: string }[] = []
       let lastId = ''
       let lastBuf: ArrayBuffer | null = null
@@ -620,15 +636,10 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
 
   const nextPlaylistSongRef = useRef(nextPlaylistSong)
   const prevPlaylistSongRef = useRef(previousPlaylistSong)
-  nextPlaylistSongRef.current = nextPlaylistSong
-  prevPlaylistSongRef.current = previousPlaylistSong
-
-  const activeLessonIdRef = useRef(activeLessonId)
-  const selectedChordIndexRef = useRef(selectedChordIndex)
   useLayoutEffect(() => {
-    activeLessonIdRef.current = activeLessonId
-    selectedChordIndexRef.current = selectedChordIndex
-  }, [activeLessonId, selectedChordIndex])
+    nextPlaylistSongRef.current = nextPlaylistSong
+    prevPlaylistSongRef.current = previousPlaylistSong
+  }, [nextPlaylistSong, previousPlaylistSong])
 
   /**
    * In Free Practice (no lesson active), the chord-practice BPM drives the
@@ -665,7 +676,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
             .sort((a, b) => a.addedAt - b.addedAt)
             .map((m) => m.id)
         }
-        let currentId =
+        const currentId =
           persist.currentId && ids.includes(persist.currentId)
             ? persist.currentId
             : ids[0] ?? null
@@ -699,7 +710,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     ctl.mode = mode
     if (mode !== 'wait') {
       ctl.resetWaitState()
-      setWaitExpectedMidi(null)
+      const id = requestAnimationFrame(() => setWaitExpectedMidi(null))
+      return () => cancelAnimationFrame(id)
     }
   }, [mode])
 
@@ -752,6 +764,11 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       setWaitExpectedMidi(null)
     }
   }, [])
+
+  const getLiveSongTime = useCallback(
+    () => controllerRef.current?.getSongTime() ?? songTimeRef.current,
+    [],
+  )
 
   const nudgePlayhead = useCallback(
     (direction: number) => {
@@ -812,15 +829,22 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     onLoopCleared?.()
   }, [onLoopCleared])
 
-  const MODES: PracticeMode[] = ['listen', 'follow', 'wait']
-  const HANDS: HandFilter[] = ['both', 'right', 'left']
-
   const cycleMode = useCallback(() => {
-    setMode((prev) => MODES[(MODES.indexOf(prev) + 1) % MODES.length]!)
+    setMode(
+      (prev) =>
+        PRACTICE_MODES[
+          (PRACTICE_MODES.indexOf(prev) + 1) % PRACTICE_MODES.length
+        ]!,
+    )
   }, [])
 
   const cycleHand = useCallback(() => {
-    setHandFilter((prev) => HANDS[(HANDS.indexOf(prev) + 1) % HANDS.length]!)
+    setHandFilter(
+      (prev) =>
+        HAND_FILTERS[
+          (HAND_FILTERS.indexOf(prev) + 1) % HAND_FILTERS.length
+        ]!,
+    )
   }, [])
 
   useEffect(() => {
@@ -950,17 +974,17 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       return
     }
     const snap = exerciseRef.current?.snapshot()
-    if (snap?.finished && activeLessonIdRef.current) {
+    if (snap?.finished && activeLessonId) {
       restartLesson()
       return
     }
     await startMetronome()
-  }, [restartLesson, startMetronome, stopMetronome])
+  }, [activeLessonId, restartLesson, startMetronome, stopMetronome])
 
   /** Record best-seen accuracy when an exercise finishes. */
   useEffect(() => {
     if (!exerciseSnapshot?.finished || !activeLessonId) return
-    setLessonProgress((prev) => {
+    const id = requestAnimationFrame(() => setLessonProgress((prev) => {
       const prior = prev[activeLessonId]?.accuracy ?? 0
       if (exerciseSnapshot.accuracy <= prior) return prev
       return {
@@ -970,7 +994,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
           updatedAt: Date.now(),
         },
       }
-    })
+    }))
+    return () => cancelAnimationFrame(id)
   }, [exerciseSnapshot?.finished, exerciseSnapshot?.accuracy, activeLessonId])
 
   useLayoutEffect(() => {
@@ -998,8 +1023,14 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       const ctl = controllerRef.current
       if (ctl?.playing) {
         ctl.tick()
-        setSongTime(ctl.getSongTime())
-        setWaitExpectedMidi(ctl.getWaitExpectedMidi())
+        const liveSongTime = ctl.getSongTime()
+        songTimeRef.current = liveSongTime
+        const now = performance.now()
+        if (now - lastReactTimeUpdateRef.current >= 100) {
+          lastReactTimeUpdateRef.current = now
+          setSongTime(liveSongTime)
+          setWaitExpectedMidi(ctl.getWaitExpectedMidi())
+        }
       }
       rafRef.current = requestAnimationFrame(loop)
     }
@@ -1344,12 +1375,12 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
           return
         }
         if (bind.chordPickerKnob && matchesCcControl(bind.chordPickerKnob, data)) {
-          if (activeLessonIdRef.current != null) return
+          if (activeLessonId != null) return
           const n = COMMON_CHORDS.length
           const pu = knobPickedUp.current
           const PICKUP_THRESH = 3
           const currentCc = Math.round(
-            (selectedChordIndexRef.current / Math.max(1, n - 1)) * 127,
+            (selectedChordIndex / Math.max(1, n - 1)) * 127,
           )
           if (!pu.chordPicker) {
             if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.chordPicker = true
@@ -1507,14 +1538,17 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     cycleHand,
     cycleMode,
     jumpToStart,
+    activeLessonId,
     midi,
     onUserNoteOn,
     onUserNoteOff,
     pausePlayback,
+    selectedChordIndex,
     setLoopA,
     setLoopB,
     setLoopEnabled,
     setSelectedTrackIndices,
+    seek,
     togglePlay,
   ])
 
@@ -1546,6 +1580,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     togglePlay,
     pausePlayback,
     songTime,
+    getLiveSongTime,
     seek,
     splitMidi,
     setSplitMidi,

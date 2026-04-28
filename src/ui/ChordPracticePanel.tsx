@@ -12,7 +12,7 @@
  *   - Lessons list grouped by module with unlock / progress state
  */
 
-import { useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import {
   chordLabel,
   chordPitchClasses,
@@ -227,7 +227,7 @@ function ChordKeyboardPreview({
 
 /* ---------------- panel ---------------- */
 
-export function ChordPracticePanel({
+function ChordPracticePanelImpl({
   audioReady,
   onEnableAudio,
   bpm,
@@ -410,6 +410,8 @@ export function ChordPracticePanel({
     </section>
   )
 }
+
+export const ChordPracticePanel = memo(ChordPracticePanelImpl)
 
 /* ---------------- Free Practice view ---------------- */
 

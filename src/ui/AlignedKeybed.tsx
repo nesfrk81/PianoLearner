@@ -16,6 +16,20 @@ type Props = {
   activeNotes: { time: number; midi: number; duration: number }[]
 }
 
+function lowerBoundNoteTime(
+  notes: { time: number; duration: number }[],
+  targetSec: number,
+): number {
+  let lo = 0
+  let hi = notes.length
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    if (notes[mid]!.time < targetSec) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
 export function AlignedKeybed({
   minMidi,
   maxMidi,
@@ -33,19 +47,34 @@ export function AlignedKeybed({
     () => getKeyRectsNormalized(minMidi, maxMidi),
     [minMidi, maxMidi],
   )
+  const maxActiveNoteDuration = useMemo(
+    () =>
+      activeNotes.reduce(
+        (max, n) => Math.max(max, Math.max(n.duration, 0.12)),
+        0,
+      ),
+    [activeNotes],
+  )
 
-  const fingerForMidi = (midi: number): number | undefined => {
-    for (const n of activeNotes) {
-      if (n.midi !== midi) continue
+  const activeFingerByMidi = useMemo(() => {
+    const out = new Map<number, number>()
+    const start = lowerBoundNoteTime(
+      activeNotes,
+      Math.max(0, songTime - maxActiveNoteDuration - 0.02),
+    )
+    for (let i = start; i < activeNotes.length; i += 1) {
+      const n = activeNotes[i]!
+      if (n.time > songTime + 0.02) break
       if (
         songTime >= n.time - 0.02 &&
         songTime <= n.time + Math.max(n.duration, 0.12)
       ) {
-        return fingeringMap.get(fingeringKey(n.time, n.midi))
+        const finger = fingeringMap.get(fingeringKey(n.time, n.midi))
+        if (finger != null) out.set(n.midi, finger)
       }
     }
-    return undefined
-  }
+    return out
+  }, [activeNotes, fingeringMap, maxActiveNoteDuration, songTime])
 
   return (
     <div className="akb" aria-label="Piano keyboard">
@@ -60,7 +89,7 @@ export function AlignedKeybed({
           if (exp && usr) cls += ' akb-hit'
           else if (exp) cls += ' akb-exp'
           else if (usr) cls += ' akb-user'
-          const fg = fingerForMidi(midi)
+          const fg = activeFingerByMidi.get(midi)
           return (
             <div
               key={midi}
