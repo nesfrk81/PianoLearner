@@ -67,7 +67,7 @@ export async function putMidiFile(row: StoredMidiRow): Promise<void> {
 
 export async function getMidiFile(
   id: string,
-): Promise<{ name: string; buffer: ArrayBuffer } | null> {
+): Promise<{ name: string; buffer: ArrayBuffer; addedAt: number } | null> {
   const db = await openDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly')
@@ -79,7 +79,38 @@ export async function getMidiFile(
         resolve(null)
         return
       }
-      resolve({ name: v.name, buffer: v.buffer })
+      resolve({
+        name: v.name,
+        buffer: v.buffer,
+        addedAt:
+          typeof v.addedAt === 'number' && Number.isFinite(v.addedAt)
+            ? v.addedAt
+            : Date.now(),
+      })
+    }
+  })
+}
+
+/** Full row — use when overwriting after edits so `addedAt` is preserved. */
+export async function getStoredMidiRow(id: string): Promise<StoredMidiRow | null> {
+  const db = await openDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly')
+    const req = tx.objectStore(STORE).get(id)
+    req.onerror = () => reject(req.error)
+    req.onsuccess = () => {
+      const v = req.result as StoredMidiRow | undefined
+      if (!v?.buffer) {
+        resolve(null)
+        return
+      }
+      resolve({
+        ...v,
+        addedAt:
+          typeof v.addedAt === 'number' && Number.isFinite(v.addedAt)
+            ? v.addedAt
+            : Date.now(),
+      })
     }
   })
 }

@@ -46,6 +46,8 @@ flowchart LR
   Hook --> Chords
 ```
 
+**Timeline animation:** While audio plays, `StaffCanvas` and `WaterfallPianoRoll` read position from `PlaybackController.getSongTime()` inside `requestAnimationFrame` (`getLiveSongTime` from the hook). React `songTime` is throttled (~100 ms) for transport labels and other non-canvas UI. The loop sheet overlay scrolls via the same live-time path as the staff canvas (see [docs/looper.md](docs/looper.md) §8, [docs/notation-phase1.md](docs/notation-phase1.md)).
+
 ---
 
 ## 4. Subsystem breakdown
@@ -62,7 +64,7 @@ Shared domain types (`PracticeMode`, `HandFilter`, `LoopSnap`, `LoopRegion`, `Pa
 | **Persistence** | Store MIDI blobs (IndexedDB), playlist order/metadata (localStorage) | `src/midi/midiPlaylistStorage.ts` | Playlist survives reloads; stored songs |
 | **MIDI hardware** | Learn/bind Play, Stop, Record (loop), loop start/end CCs; monitor message formatting | `src/midi/midiHardwareBindings.ts`, `src/midi/midiMonitorFormat.ts` | Settings → MIDI hardware; live MIDI log |
 | **Audio** | Soundfont loading, note on/off for preview and playback | `src/audio/pianoInstrument.ts` | “Tap to enable audio”, load progress, piano timbre |
-| **Timeline / visualization** | Waterfall, staff canvas, aligned keybed, time ↔ sheet mapping, timeline layout constants | `src/ui/WaterfallPianoRoll.tsx`, `src/ui/StaffCanvas.tsx`, `src/ui/AlignedKeybed.tsx`, `src/ui/MusicTimeline.tsx`, `src/ui/sheetTimeMapping.ts`, `src/ui/pianoKeyLayout.ts`, `src/ui/timelineConstants.ts` | Scrolling notes, seeking, key highlights, sheet/loop overlays |
+| **Timeline / visualization** | Waterfall, staff canvas, aligned keybed, time ↔ sheet mapping, timeline layout constants; RAF animation from live controller time; loop overlay DOM sync on staff | `src/ui/WaterfallPianoRoll.tsx`, `src/ui/StaffCanvas.tsx`, `src/ui/AlignedKeybed.tsx`, `src/ui/MusicTimeline.tsx`, `src/ui/sheetTimeMapping.ts`, `src/ui/pianoKeyLayout.ts`, `src/ui/timelineConstants.ts` | Scrolling notes, seeking, key highlights, sheet/loop overlays (overlay scrolls in lockstep with notation during playback) |
 | **Settings / mapping UI** | Settings modal (tracks, modes, latency, etc.); MIDI mapping panel | `src/ui/SettingsModal.tsx`, `src/ui/MidiMappingPanel.tsx` | Gear menu, learn/bind UI |
 | **Chord Learning** | Metronome scheduler, chord catalog + pitch-class math + held-chord detection, exercise state machine (chord ladder, circle of fifths, random game), lesson catalog + progress persistence, always-visible practice panel | `src/chords/metronome.ts`, `src/chords/chordModel.ts`, `src/chords/exerciseEngine.ts`, `src/chords/lessonCatalog.ts`, `src/chords/chordUserPreferences.ts`, `src/ui/ChordPracticePanel.tsx` | Chord Practice panel (Free Practice + Lessons tabs), metronome start/stop + BPM, chord picker, live held-chord readout, lesson runner with current + upcoming chord and accuracy scoring |
 
@@ -82,7 +84,7 @@ Use these as traceability anchors when filing or fixing bugs.
 - **Practice**
   - Modes: `listen` | `follow` | `wait` (see `PracticeMode` in `src/types.ts`).
   - Hand filter: `both` | `left` | `right`.
-  - A/B loop region; optional loop snap (`LoopSnap`: off / beat / bar).
+  - A/B loop region (staff click, draggable overlay handles, MIDI knobs); optional loop snap (`LoopSnap`: off / beat / bar). Overlay remains editable until **Done**; scrolls with playback while open.
 - **Input**
   - Enumerate Web MIDI inputs; display device name when available.
   - Optional hardware bindings for Play, Stop, Record (loop toggle), loop range controls.
@@ -109,6 +111,7 @@ Use these as traceability anchors when filing or fixing bugs.
 
 - **PWA / offline:** `vite-plugin-pwa` registers the service worker with `registerType: 'autoUpdate'`. Workbox precaches static assets (`globPatterns` in `vite.config.ts`). Base path can follow `BASE_PATH` for GitHub Pages subpaths.
 - **Browsers:** Web MIDI is required for USB MIDI; Chrome and Edge are the primary targets (see README).
+- **Playback UI performance:** Timeline canvases and the loop sheet overlay must animate smoothly during playback without forcing a full React tree update every frame; live time comes from the audio engine, not throttled `songTime` state, for those surfaces.
 - **Privacy / data:** MIDI files and playlist data are stored locally in the browser; no server upload in-app.
 
 ---
@@ -148,6 +151,8 @@ Fill in rows as you discover issues. Sort by `Subsystem` before a fix pass.
 ## 8. Related links
 
 - **User guide (controls, install, run from source):** [README.md](README.md)
-- **Looper internals (A/B loop, state, MIDI, engine):** [docs/looper.md](docs/looper.md)
+- **Looper internals (A/B loop, state, MIDI, engine, overlay sync):** [docs/looper.md](docs/looper.md)
+- **MIDI piano-roll editor (layout, zoom, paint/erase):** [docs/midi-editor.md](docs/midi-editor.md)
+- **Staff notation v1 contracts and renderer criteria:** [docs/notation-phase1.md](docs/notation-phase1.md)
 - **Deploy (GitHub Pages):** [.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml)
 - **Live app:** [https://nesfrk81.github.io/PianoLearner/](https://nesfrk81.github.io/PianoLearner/)

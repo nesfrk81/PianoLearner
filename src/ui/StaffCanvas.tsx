@@ -25,6 +25,15 @@ function lowerBoundNoteTime(notes: NoteView[], targetSec: number): number {
   return lo
 }
 
+type LoopOverlayRefs = {
+  dimLeft: HTMLDivElement | null
+  dimRight: HTMLDivElement | null
+  bandWrap: HTMLDivElement | null
+  moveHandle: HTMLButtonElement | null
+  handleA: HTMLDivElement | null
+  handleB: HTMLDivElement | null
+}
+
 type Props = {
   notes: NoteView[]
   duration: number
@@ -38,8 +47,34 @@ type Props = {
   userMidi: ReadonlySet<number>
   onInitLoopRegion: (centerSec: number) => void
   onLoopBoundsChange: (a: number, b: number) => void
+  onLoopShift: (centerSec: number) => void
   loopOverlayOpen: boolean
   onCloseLoopOverlay: () => void
+}
+
+function LoopMoveIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      aria-hidden
+      className="sheet-loop-move-icon"
+    >
+      <path
+        d="M2 4h10M2 7h10M2 10h10"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path
+        d="M1 7h2M11 7h2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
 }
 
 export function StaffCanvas({
@@ -55,54 +90,83 @@ export function StaffCanvas({
   userMidi,
   onInitLoopRegion,
   onLoopBoundsChange,
+  onLoopShift,
   loopOverlayOpen,
   onCloseLoopOverlay,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null)
   const setCanvasRef = useCallback((node: HTMLCanvasElement | null) => {
     canvasRef.current = node
-    setCanvasEl(node)
   }, [])
 
   const songTimeRef = useRef(songTime)
   const loopARef = useRef(loopA)
   const loopBRef = useRef(loopB)
   const durationRef = useRef(duration)
+  const loopOverlayOpenRef = useRef(loopOverlayOpen)
+  const [moveDragging, setMoveDragging] = useState(false)
 
-  const [canvasRectW, setCanvasRectW] = useState(0)
+  const overlayRefs = useRef<LoopOverlayRefs>({
+    dimLeft: null,
+    dimRight: null,
+    bandWrap: null,
+    moveHandle: null,
+    handleA: null,
+    handleB: null,
+  })
+  const drawRef = useRef<(() => void) | null>(null)
 
   useLayoutEffect(() => {
     songTimeRef.current = songTime
     loopARef.current = loopA
     loopBRef.current = loopB
     durationRef.current = duration
-  }, [songTime, loopA, loopB, duration])
+    loopOverlayOpenRef.current = loopOverlayOpen
+  }, [songTime, loopA, loopB, duration, loopOverlayOpen])
+
+  const syncLoopOverlay = useCallback((t: number) => {
+    const canvas = canvasRef.current
+    if (!canvas || durationRef.current <= 0) return
+    const { dimLeft, dimRight, bandWrap, moveHandle, handleA, handleB } =
+      overlayRefs.current
+    if (!dimLeft || !dimRight || !bandWrap || !moveHandle || !handleA || !handleB)
+      return
+
+    const left = songTimeToCssLeft(loopARef.current, canvas, t)
+    const right = songTimeToCssLeft(loopBRef.current, canvas, t)
+    const bandW = Math.max(0, right - left)
+
+    dimLeft.style.width = `${Math.max(0, left)}px`
+    dimRight.style.left = `${right}px`
+    bandWrap.style.left = `${left}px`
+    bandWrap.style.width = `${bandW}px`
+    moveHandle.style.left = ''
+    handleA.style.left = `${left}px`
+    handleB.style.left = `${right}px`
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!loopOverlayOpen || playing) return
+    syncLoopOverlay(songTime)
+  }, [
+    loopOverlayOpen,
+    playing,
+    songTime,
+    loopA,
+    loopB,
+    syncLoopOverlay,
+  ])
 
   useEffect(() => {
-    if (!canvasEl) return
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width
-      if (w != null) setCanvasRectW(w)
+    if (!canvasRef.current) return
+    const canvas = canvasRef.current
+    const ro = new ResizeObserver(() => {
+      if (!loopOverlayOpenRef.current) return
+      syncLoopOverlay(getSongTime())
     })
-    ro.observe(canvasEl)
+    ro.observe(canvas)
     return () => ro.disconnect()
-  }, [canvasEl])
-
-  const overlayPx = useMemo(
-    () => {
-      if (!canvasEl || duration <= 0 || !loopOverlayOpen) {
-        return { left: 0, right: 0 }
-      }
-      return {
-        left: songTimeToCssLeft(loopA, canvasEl, songTime),
-        right: songTimeToCssLeft(loopB, canvasEl, songTime),
-      }
-    },
-    /* canvasRectW: bust cache when element is resized without changing ref */
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canvasEl, canvasRectW, loopA, loopB, songTime, duration, loopOverlayOpen],
-  )
+  }, [getSongTime, syncLoopOverlay])
 
   const centerX = VIEW_WIDTH * PLAYHEAD_X_FRAC
   const maxNoteDuration = useMemo(
@@ -247,9 +311,14 @@ export function StaffCanvas({
       ctx.lineTo(centerX, STAFF_HEIGHT)
       ctx.stroke()
 
+      if (loopOverlayOpenRef.current) {
+        syncLoopOverlay(currentSongTime)
+      }
+
       if (playing) raf = requestAnimationFrame(draw)
     }
 
+    drawRef.current = draw
     draw()
     return () => cancelAnimationFrame(raf)
   }, [
@@ -262,12 +331,23 @@ export function StaffCanvas({
     maxNoteDuration,
     notes,
     playing,
-    songTime,
     splitMidi,
+    syncLoopOverlay,
     userMidi,
   ])
 
+  useLayoutEffect(() => {
+    if (playing) return
+    drawRef.current?.()
+  }, [playing, songTime])
+
+  useLayoutEffect(() => {
+    if (!loopOverlayOpen) return
+    syncLoopOverlay(playing ? getSongTime() : songTime)
+  }, [loopOverlayOpen, playing, getSongTime, songTime, syncLoopOverlay])
+
   const onCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (loopOverlayOpen) return
     const canvas = canvasRef.current
     if (!canvas || duration <= 0) return
     const sec = clientXToSongTime(e.clientX, canvas, getSongTime())
@@ -307,8 +387,43 @@ export function StaffCanvas({
     window.addEventListener('pointercancel', up)
   }
 
-  const { left: leftPx, right: rightPx } = overlayPx
-  const showOverlay = duration > 0 && loopOverlayOpen && rightPx >= leftPx
+  const attachMoveDrag = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const canvas = canvasRef.current
+    const handle = e.currentTarget
+    if (!canvas) return
+
+    handle.setPointerCapture(e.pointerId)
+    setMoveDragging(true)
+
+    const move = (ev: PointerEvent) => {
+      const centerSec = clientXToSongTime(ev.clientX, canvas, getSongTime())
+      onLoopShift(centerSec)
+    }
+
+    const up = (ev: PointerEvent) => {
+      if (handle.hasPointerCapture(ev.pointerId)) {
+        handle.releasePointerCapture(ev.pointerId)
+      }
+      setMoveDragging(false)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
+
+  const blockHandleArrowKeys = (e: React.KeyboardEvent) => {
+    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+      e.preventDefault()
+    }
+  }
+
+  const showOverlay = duration > 0 && loopOverlayOpen && loopB > loopA
 
   return (
     <div className="sheet-canvas-wrap">
@@ -321,23 +436,43 @@ export function StaffCanvas({
         role="img"
         aria-label="Sheet music — click to set loop region"
       />
-      {showOverlay && (
+      {showOverlay ? (
         <div className="sheet-loop-overlay">
           <div
-            className="sheet-loop-dim sheet-loop-dim--left"
-            style={{ width: `${Math.max(0, leftPx)}px` }}
-          />
-          <div
-            className="sheet-loop-dim sheet-loop-dim--right"
-            style={{ left: `${rightPx}px` }}
-          />
-          <div
-            className="sheet-loop-band"
-            style={{
-              left: `${leftPx}px`,
-              width: `${Math.max(0, rightPx - leftPx)}px`,
+            ref={(el) => {
+              overlayRefs.current.dimLeft = el
             }}
+            className="sheet-loop-dim sheet-loop-dim--left"
           />
+          <div
+            ref={(el) => {
+              overlayRefs.current.dimRight = el
+            }}
+            className="sheet-loop-dim sheet-loop-dim--right"
+          />
+          <div
+            ref={(el) => {
+              overlayRefs.current.bandWrap = el
+            }}
+            className="sheet-loop-band-wrap"
+          >
+            <div className="sheet-loop-band" aria-hidden />
+            <button
+              type="button"
+              ref={(el) => {
+                overlayRefs.current.moveHandle = el
+              }}
+              className={
+                'sheet-loop-move' +
+                (moveDragging ? ' sheet-loop-move--dragging' : '')
+              }
+              aria-label="Move loop region — drag left or right"
+              onPointerDown={attachMoveDrag}
+              onKeyDown={blockHandleArrowKeys}
+            >
+              <LoopMoveIcon />
+            </button>
+          </div>
           <button
             type="button"
             className="sheet-loop-done"
@@ -347,22 +482,30 @@ export function StaffCanvas({
           </button>
           <div
             role="slider"
+            tabIndex={-1}
+            ref={(el) => {
+              overlayRefs.current.handleA = el
+            }}
             className="sheet-loop-handle sheet-loop-handle--a"
-            style={{ left: `${leftPx}px` }}
             aria-label="Loop start — drag to adjust"
             aria-valuenow={Math.round(loopA * 1000) / 1000}
             onPointerDown={attachDrag('a')}
+            onKeyDown={blockHandleArrowKeys}
           />
           <div
             role="slider"
+            tabIndex={-1}
+            ref={(el) => {
+              overlayRefs.current.handleB = el
+            }}
             className="sheet-loop-handle sheet-loop-handle--b"
-            style={{ left: `${rightPx}px` }}
             aria-label="Loop end — drag to adjust"
             aria-valuenow={Math.round(loopB * 1000) / 1000}
             onPointerDown={attachDrag('b')}
+            onKeyDown={blockHandleArrowKeys}
           />
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

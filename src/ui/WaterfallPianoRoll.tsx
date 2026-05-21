@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { getKeyRectsNormalized, relKeyGeom } from './pianoKeyLayout'
 import type { NoteView } from '../types'
 import { VIEW_WIDTH as VIEW_W } from './timelineConstants'
@@ -39,6 +39,7 @@ export function WaterfallPianoRoll({
   onSeek,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const drawRef = useRef<(() => void) | null>(null)
   const rects = useMemo(
     () => getKeyRectsNormalized(minPitch, maxPitch),
     [minPitch, maxPitch],
@@ -131,12 +132,12 @@ export function WaterfallPianoRoll({
       if (playing) raf = requestAnimationFrame(draw)
     }
 
+    drawRef.current = draw
     draw()
     return () => cancelAnimationFrame(raf)
   }, [
     notes,
     duration,
-    songTime,
     getSongTime,
     playing,
     minPitch,
@@ -144,6 +145,11 @@ export function WaterfallPianoRoll({
     rects,
     maxNoteDuration,
   ])
+
+  useLayoutEffect(() => {
+    if (playing) return
+    drawRef.current?.()
+  }, [playing, songTime])
 
   const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const c = canvasRef.current

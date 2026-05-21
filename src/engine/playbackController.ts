@@ -307,8 +307,14 @@ export class PlaybackController {
       this.anchorSong = next.time
       this.anchorAudio = this.ctx.currentTime
     } else {
-      this.pause()
-      this.seek(0)
+      // Finished the piece: rewind for another pass without pausing transport.
+      // If we called pause() here, React could still think "playing" while the
+      // RAF tick loop stops calling tick() — wait mode would never re-arm.
+      if (this.loop && this.loop.b > this.loop.a + 0.05) {
+        this.seek(this.loop.a)
+      } else {
+        this.seek(0)
+      }
     }
   }
 

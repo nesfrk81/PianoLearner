@@ -33,6 +33,7 @@ import { formatMidiMessage, shouldLogMidiMessage } from '../midi/midiMonitorForm
 import {
   deleteMidiFile,
   getMidiFile,
+  getStoredMidiRow,
   listStoredMidiMeta,
   loadPlaylistPersist,
   putMidiFile,
@@ -55,6 +56,11 @@ import {
   uniqueEnds,
   uniqueOnsets,
 } from '../engine/loopSnap'
+import {
+  timesInRange,
+  visibleSongTimeRange,
+  WHEEL_SEEK_ZONE_ATTR,
+} from '../ui/timelineConstants'
 import {
   MAX_BPM,
   Metronome,
@@ -97,15 +103,24 @@ export type UsePianoLearnerOptions = {
   /** Set loop (1s window) centered on current playhead — MIDI “record” / learned control. */
   onLoopAtPlayhead?: () => void
   /**
-   * When `.current` is true, Space / arrows / Home do not control transport (e.g. settings modal open).
+   * When `.current` is true, Space / arrows / wheel / Home do not control transport (e.g. settings modal open).
    * MIDI learn mode blocks those keys inside the hook regardless.
    */
   keyboardTransportBlockedRef?: MutableRefObject<boolean>
+  /** When true, global mouse wheel does not nudge the playhead (MIDI editor open). */
+  midiEditorOpenRef?: MutableRefObject<boolean>
+  /** Called each visual transport frame while playing, when the MIDI editor is open. */
+  editorTransportRef?: MutableRefObject<((timeSec: number) => void) | null>
 }
 
 export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
-  const { onLoopCleared, onLoopAtPlayhead, keyboardTransportBlockedRef } =
-    options
+  const {
+    onLoopCleared,
+    onLoopAtPlayhead,
+    keyboardTransportBlockedRef,
+    midiEditorOpenRef,
+    editorTransportRef,
+  } = options
   const onLoopAtPlayheadRef = useRef(onLoopAtPlayhead)
   const ctxRef = useRef<AudioContext | null>(null)
   const pianoRef = useRef<Soundfont | null>(null)
@@ -121,6 +136,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   const [sfLoadDone, setSfLoadDone] = useState(0)
 
   const [midi, setMidi] = useState<Midi | null>(null)
+  /** True after local edits until committed to IndexedDB with {@link commitMidiToIndexedDb}. */
+  const [midiHasPendingEdits, setMidiHasPendingEdits] = useState(false)
   const [fileName, setFileName] = useState<string>('')
   const [playlist, setPlaylist] = useState<{ id: string; name: string }[]>([])
   const [currentPlaylistId, setCurrentPlaylistId] = useState<string | null>(null)
@@ -130,6 +147,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   >([0])
   const [mode, setMode] = useState<PracticeMode>('listen')
   const [playing, setPlaying] = useState(false)
+  /** Mirrors `playing` for the RAF loop (layout-synced so pause/end-of-song is not missed). */
+  const playingRef = useRef(playing)
   const [songTime, setSongTime] = useState(0)
   const [splitMidi, setSplitMidi] = useState(60)
   /** Multiplier for USB MIDI note-on velocity (1 = as sent; higher = louder at same touch). */
@@ -194,10 +213,14 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     loopStart: false,
     loopEnd: false,
     loopShift: false,
+    loopShiftBaseCc: 64,
+    loopShiftBaseIdx: 0,
     trackFocus: false,
     metronomeBpm: false,
     chordPicker: false,
   })
+  /** Visible staff range at last loop-knob pickup; invalidates soft-takeover when it changes. */
+  const loopKnobVisAnchorRef = useRef({ visStart: -1, visEnd: -1 })
   /** Which MIDI file track index the hardware “track toggle” acts on (tracks with notes only). */
   const trackFocusRef = useRef<number | null>(null)
   /** Mirrors {@link trackFocusRef} for UI (track dropdown highlights + opens on knob). */
@@ -206,6 +229,10 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   )
   /** Incremented when the MIDI track focus knob updates focus — opens the tracks dropdown. */
   const [midiTrackDropdownBump, setMidiTrackDropdownBump] = useState(0)
+  useLayoutEffect(() => {
+    playingRef.current = playing
+  }, [playing])
+
   useLayoutEffect(() => {
     onLoopAtPlayheadRef.current = onLoopAtPlayhead
     bindingsRef.current = midiHardwareBindings
@@ -454,6 +481,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
 
   const applyMidiFromBuffer = useCallback(
     async (buf: ArrayBuffer, name: string) => {
+      setMidiHasPendingEdits(false)
       setLoopEnabled(false)
       onLoopCleared?.()
       await ensureAudio()
@@ -496,6 +524,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
           loopStart: false,
           loopEnd: false,
           loopShift: false,
+          loopShiftBaseCc: 64,
+          loopShiftBaseIdx: 0,
           trackFocus: false,
           metronomeBpm: knobPickedUp.current.metronomeBpm,
           chordPicker: knobPickedUp.current.chordPicker,
@@ -510,6 +540,46 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
   useLayoutEffect(() => {
     applyMidiFromBufferRef.current = applyMidiFromBuffer
   }, [applyMidiFromBuffer])
+
+  /** Replace the loaded MIDI (new instance) after piano-roll edits; syncs playback + loop bounds. */
+  const applyMidiEdit = useCallback((next: Midi) => {
+    setMidi(next)
+    setMidiHasPendingEdits(true)
+    const dur = Math.max(0, next.duration)
+    const ctl = controllerRef.current
+    if (ctl) {
+      ctl.setMidi(next)
+      let t = ctl.getSongTime()
+      if (t > dur) {
+        ctl.seek(Math.max(0, dur))
+        t = ctl.getSongTime()
+      }
+      setSongTime(t)
+    }
+    const a = Math.min(loopARef.current, dur)
+    let b = Math.min(loopBRef.current, dur)
+    if (b <= a + 0.05 && dur > a) {
+      b = Math.min(dur, a + Math.min(8, dur - a))
+    }
+    setLoopA(a)
+    setLoopB(b)
+  }, [])
+
+  const commitMidiToIndexedDb = useCallback(async () => {
+    if (!midi || !currentPlaylistId) return
+    const existing = await getStoredMidiRow(currentPlaylistId)
+    const addedAt = existing?.addedAt ?? Date.now()
+    const u8 = midi.toArray()
+    const copy = new Uint8Array(u8.byteLength)
+    copy.set(u8)
+    await putMidiFile({
+      id: currentPlaylistId,
+      name: fileName,
+      buffer: copy.buffer,
+      addedAt,
+    })
+    setMidiHasPendingEdits(false)
+  }, [midi, currentPlaylistId, fileName])
 
   const newMidiId = () =>
     typeof crypto !== 'undefined' && crypto.randomUUID
@@ -588,6 +658,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
           setLoopEnabled(false)
           onLoopCleared?.()
           await ensureAudio()
+          setMidiHasPendingEdits(false)
           setMidi(null)
           setFileName('')
           setWaitExpectedMidi(null)
@@ -606,6 +677,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
             loopStart: false,
             loopEnd: false,
             loopShift: false,
+            loopShiftBaseCc: 64,
+            loopShiftBaseIdx: 0,
             trackFocus: false,
             metronomeBpm: knobPickedUp.current.metronomeBpm,
             chordPicker: knobPickedUp.current.chordPicker,
@@ -753,17 +826,33 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     setWaitExpectedMidi(null)
   }, [])
 
-  const seek = useCallback((t: number) => {
+  /** Seek transport + refs only (no React state). Safe for high-frequency scrubbing. */
+  const seekAudio = useCallback((t: number) => {
     const ctl = controllerRef.current
     if (ctl) {
       ctl.seek(t)
+      songTimeRef.current = ctl.getSongTime()
+    } else {
+      songTimeRef.current = Math.max(0, t)
+    }
+  }, [])
+
+  const seek = useCallback((t: number) => {
+    seekAudio(t)
+    const ctl = controllerRef.current
+    if (ctl) {
       setSongTime(ctl.getSongTime())
       setWaitExpectedMidi(ctl.getWaitExpectedMidi())
     } else {
       setSongTime(t)
       setWaitExpectedMidi(null)
     }
-  }, [])
+    const pu = knobPickedUp.current
+    pu.loopStart = false
+    pu.loopEnd = false
+    pu.loopShift = false
+    loopKnobVisAnchorRef.current = { visStart: -1, visEnd: -1 }
+  }, [seekAudio])
 
   const getLiveSongTime = useCallback(
     () => controllerRef.current?.getSongTime() ?? songTimeRef.current,
@@ -803,6 +892,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         loopStart: false,
         loopEnd: false,
         loopShift: false,
+        loopShiftBaseCc: 64,
+        loopShiftBaseIdx: 0,
         trackFocus: knobPickedUp.current.trackFocus,
         metronomeBpm: knobPickedUp.current.metronomeBpm,
         chordPicker: knobPickedUp.current.chordPicker,
@@ -815,6 +906,27 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     initLoopAtCenterRef.current = initLoopAtCenter
   }, [initLoopAtCenter])
 
+  /** Shift the loop region horizontally; width unchanged (mouse center handle). */
+  const shiftLoopRegion = useCallback(
+    (centerSec: number) => {
+      const d = midi?.duration ?? 0
+      const a0 = loopARef.current
+      const b0 = loopBRef.current
+      const region = b0 - a0
+      if (region < 0.05 || d <= 0) return
+      const newA = Math.max(0, Math.min(centerSec - region / 2, d - region))
+      const newB = newA + region
+      setLoopA(newA)
+      setLoopB(newB)
+      setLoopCenter(newA + region / 2)
+    },
+    [midi],
+  )
+  const shiftLoopRegionRef = useRef(shiftLoopRegion)
+  useLayoutEffect(() => {
+    shiftLoopRegionRef.current = shiftLoopRegion
+  }, [shiftLoopRegion])
+
   const clearLoop = useCallback(() => {
     setLoopEnabled(false)
     setLoopCenter(null)
@@ -822,6 +934,8 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       loopStart: false,
       loopEnd: false,
       loopShift: false,
+      loopShiftBaseCc: 64,
+      loopShiftBaseIdx: 0,
       trackFocus: false,
       metronomeBpm: knobPickedUp.current.metronomeBpm,
       chordPicker: knobPickedUp.current.chordPicker,
@@ -1023,20 +1137,39 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
       const ctl = controllerRef.current
       if (ctl?.playing) {
         ctl.tick()
+      }
+      if (ctl && !ctl.playing && playingRef.current) {
+        /* tick() can call pause() (e.g. end of song in listen mode). Keep UI in sync. */
+        playingRef.current = false
+        setPlaying(false)
+        const t = ctl.getSongTime()
+        songTimeRef.current = t
+        setSongTime(t)
+        setWaitExpectedMidi(ctl.getWaitExpectedMidi())
+      } else if (ctl?.playing) {
         const liveSongTime = ctl.getSongTime()
         songTimeRef.current = liveSongTime
-        const now = performance.now()
-        if (now - lastReactTimeUpdateRef.current >= 100) {
-          lastReactTimeUpdateRef.current = now
-          setSongTime(liveSongTime)
-          setWaitExpectedMidi(ctl.getWaitExpectedMidi())
+        if (midiEditorOpenRef?.current) {
+          editorTransportRef?.current?.(liveSongTime)
+          const now = performance.now()
+          if (now - lastReactTimeUpdateRef.current >= 1000) {
+            lastReactTimeUpdateRef.current = now
+            setSongTime(liveSongTime)
+          }
+        } else {
+          const now = performance.now()
+          if (now - lastReactTimeUpdateRef.current >= 100) {
+            lastReactTimeUpdateRef.current = now
+            setSongTime(liveSongTime)
+            setWaitExpectedMidi(ctl.getWaitExpectedMidi())
+          }
         }
       }
       rafRef.current = requestAnimationFrame(loop)
     }
     rafRef.current = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [playing])
+  }, [playing, midiEditorOpenRef, editorTransportRef])
 
   useEffect(() => {
     const wake = () => {
@@ -1160,6 +1293,32 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     nudgePlayhead,
     togglePlay,
   ])
+
+  useEffect(() => {
+    const isFormControl = (target: EventTarget | null) =>
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement
+
+    const onWheel = (e: WheelEvent) => {
+      if (isFormControl(e.target)) return
+      if (midiLearnModeRef.current || keyboardTransportBlockedRef?.current) return
+      if (midiEditorOpenRef?.current) return
+      if (!midi) return
+      if (e.deltaY === 0) return
+      const target = e.target
+      if (
+        !(target instanceof Element) ||
+        !target.closest(`[${WHEEL_SEEK_ZONE_ATTR}]`)
+      ) {
+        return
+      }
+      e.preventDefault()
+      nudgePlayhead(e.deltaY > 0 ? -1 : 1)
+    }
+    window.addEventListener('wheel', onWheel, { passive: false })
+    return () => window.removeEventListener('wheel', onWheel)
+  }, [keyboardTransportBlockedRef, midiEditorOpenRef, midi, nudgePlayhead])
 
   useEffect(() => {
     if (!navigator.requestMIDIAccess) {
@@ -1427,9 +1586,24 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
         const PICKUP_THRESH = 3
         const onsets = noteOnsetsRef.current
         const ends = noteEndsRef.current
+        const liveT = controllerRef.current?.getSongTime() ?? songTimeRef.current
+        const { start: visStart, end: visEnd } = visibleSongTimeRange(liveT)
+        const visibleOnsets = timesInRange(onsets, visStart, visEnd)
+        const visibleEnds = timesInRange(ends, visStart, visEnd)
+        const edgeInView = (t: number) => t >= visStart && t <= visEnd
+        const visAnchor = loopKnobVisAnchorRef.current
+        const visChanged =
+          Math.abs(visAnchor.visStart - visStart) > 0.02 ||
+          Math.abs(visAnchor.visEnd - visEnd) > 0.02
+        if (visChanged) {
+          pu.loopStart = false
+          pu.loopEnd = false
+          pu.loopShift = false
+        }
 
         if (bind.loopStartKnob && matchesCcControl(bind.loopStartKnob, data)) {
-          const candidates = onsets.filter((t) => t <= center + 0.001)
+          if (!edgeInView(loopARef.current)) return
+          const candidates = visibleOnsets.filter((t) => t <= center + 0.001)
           if (candidates.length === 0) return
           const idx = ccToTimeIndex(v, candidates)
           const currentIdx = candidates.reduce(
@@ -1439,15 +1613,18 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
           )
           const currentCc = candidates.length <= 1 ? 64 : Math.round((currentIdx / (candidates.length - 1)) * 127)
           if (!pu.loopStart) {
-            if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopStart = true
-            else return
+            if (Math.abs(v - currentCc) <= PICKUP_THRESH) {
+              pu.loopStart = true
+              loopKnobVisAnchorRef.current = { visStart, visEnd }
+            } else return
           }
           const newA = candidates[idx]!
           if (newA < loopBRef.current - 0.04) setLoopA(newA)
           return
         }
         if (bind.loopEndKnob && matchesCcControl(bind.loopEndKnob, data)) {
-          const candidates = ends.filter((t) => t >= center - 0.001)
+          if (!edgeInView(loopBRef.current)) return
+          const candidates = visibleEnds.filter((t) => t >= center - 0.001)
           if (candidates.length === 0) return
           const idx = ccToTimeIndex(v, candidates)
           const currentIdx = candidates.reduce(
@@ -1457,34 +1634,50 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
           )
           const currentCc = candidates.length <= 1 ? 64 : Math.round((currentIdx / (candidates.length - 1)) * 127)
           if (!pu.loopEnd) {
-            if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopEnd = true
-            else return
+            if (Math.abs(v - currentCc) <= PICKUP_THRESH) {
+              pu.loopEnd = true
+              loopKnobVisAnchorRef.current = { visStart, visEnd }
+            } else return
           }
           const newB = candidates[idx]!
           if (newB > loopARef.current + 0.04) setLoopB(Math.min(d, newB))
           return
         }
         if (bind.loopShiftKnob && matchesCcControl(bind.loopShiftKnob, data)) {
-          if (onsets.length === 0) return
+          if (visibleOnsets.length === 0) return
           const region = loopBRef.current - loopARef.current
           if (region < 0.05) return
-          const idx = ccToTimeIndex(v, onsets)
-          const currentIdx = onsets.reduce(
+          const currentIdx = visibleOnsets.reduce(
             (best, t, i) =>
-              Math.abs(t - loopARef.current) < Math.abs(onsets[best]! - loopARef.current) ? i : best,
+              Math.abs(t - loopARef.current) <
+              Math.abs(visibleOnsets[best]! - loopARef.current)
+                ? i
+                : best,
             0,
           )
-          const currentCc = onsets.length <= 1 ? 64 : Math.round((currentIdx / (onsets.length - 1)) * 127)
+          const currentCc =
+            visibleOnsets.length <= 1
+              ? 64
+              : Math.round((currentIdx / (visibleOnsets.length - 1)) * 127)
           if (!pu.loopShift) {
-            if (Math.abs(v - currentCc) <= PICKUP_THRESH) pu.loopShift = true
-            else return
+            if (Math.abs(v - currentCc) <= PICKUP_THRESH) {
+              pu.loopShift = true
+              pu.loopShiftBaseCc = v
+              pu.loopShiftBaseIdx = currentIdx
+              loopKnobVisAnchorRef.current = { visStart, visEnd }
+            } else return
           }
-          const newA = onsets[idx]!
-          const newB = Math.min(d, newA + region)
-          setLoopA(newA)
-          setLoopB(newB)
-          setLoopCenter(newA + (newB - newA) / 2)
-          seek(newA)
+          const idxAtV = ccToTimeIndex(v, visibleOnsets)
+          const idxAtBase = ccToTimeIndex(pu.loopShiftBaseCc, visibleOnsets)
+          const idx = Math.max(
+            0,
+            Math.min(
+              visibleOnsets.length - 1,
+              pu.loopShiftBaseIdx + (idxAtV - idxAtBase),
+            ),
+          )
+          const shiftCenter = visibleOnsets[idx]! + region / 2
+          shiftLoopRegionRef.current(shiftCenter)
           return
         }
       }
@@ -1582,6 +1775,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     songTime,
     getLiveSongTime,
     seek,
+    seekAudio,
     splitMidi,
     setSplitMidi,
     midiVelocitySensitivity,
@@ -1592,6 +1786,9 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     playlistHydrated,
     selectPlaylistSong,
     removePlaylistSong,
+    midiHasPendingEdits,
+    applyMidiEdit,
+    commitMidiToIndexedDb,
     handFilter,
     setHandFilter,
     fingeringMap,
@@ -1608,6 +1805,7 @@ export function usePianoLearner(options: UsePianoLearnerOptions = {}) {
     setLoopB,
     loopCenter,
     initLoopAtCenter,
+    shiftLoopRegion,
     noteOnsets,
     noteEnds,
     nudgePlayhead,

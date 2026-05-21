@@ -549,6 +549,211 @@
   margin: 0.5rem 0;
 }
 
+.practice-bar-tracks-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.45rem 0.65rem;
+}
+
+.practice-bar-tracks-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.practice-bar-edit-btn,
+.practice-bar-download-btn {
+  min-height: 2.5rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.midi-editor {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: min(72vh, 640px);
+  max-height: min(72vh, 640px);
+  min-height: 320px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  background: var(--bg, #121212);
+  color: var(--text);
+}
+
+.midi-editor__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg, #121212);
+}
+
+.midi-editor__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.midi-editor__filename {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.midi-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.midi-editor__close {
+  min-width: 2rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.midi-editor__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg, #121212);
+}
+
+.midi-editor__toolbar .track-dropdown {
+  min-width: 12rem;
+  max-width: min(100%, 22rem);
+}
+
+.midi-editor__hint {
+  margin: 0;
+  flex: 1;
+  min-width: 12rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--text);
+  opacity: 0.9;
+}
+
+.midi-editor__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  background: var(--midi-editor-bg, var(--code-bg));
+}
+
+.midi-editor__keys-col {
+  flex-shrink: 0;
+  width: 56px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+.midi-editor__corner {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--midi-editor-ruler-bg, var(--code-bg));
+}
+
+.midi-editor__keys-view {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.midi-editor__keys-canvas {
+  display: block;
+  touch-action: none;
+}
+
+.midi-editor__pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.midi-editor__ruler-viewport {
+  flex-shrink: 0;
+  height: 24px;
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--midi-editor-ruler-bg, var(--code-bg));
+  cursor: pointer;
+  touch-action: none;
+}
+
+.midi-editor__ruler-canvas {
+  display: block;
+  touch-action: none;
+}
+
+.midi-editor__grid-viewport {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.midi-editor__scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  cursor: crosshair;
+  touch-action: pan-x pan-y;
+}
+
+.midi-editor__spacer {
+  pointer-events: none;
+}
+
+.midi-editor__grid-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+  touch-action: none;
+  z-index: 1;
+}
+
+.midi-editor__playhead-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  pointer-events: none;
+  touch-action: none;
+  z-index: 2;
+}
+
+.midi-editor__playhead-layer--ruler {
+  height: 24px;
+}
+
 .practice-bar-tracks-label {
   font-size: 0.75rem;
   font-weight: 600;
@@ -840,15 +1045,62 @@
   right: 0;
 }
 
-.sheet-loop-band {
+.sheet-loop-band-wrap {
   position: absolute;
   top: 0;
   bottom: 0;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+.sheet-loop-band {
+  position: absolute;
+  inset: 0;
   background: rgba(59, 130, 246, 0.12);
   border-left: 2px solid rgba(37, 99, 235, 0.85);
   border-right: 2px solid rgba(37, 99, 235, 0.85);
   pointer-events: none;
   box-sizing: border-box;
+}
+
+/* Centered in .sheet-loop-band-wrap only — do not set overlay-absolute left from JS */
+.sheet-loop-move {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(29, 78, 216, 0.9);
+  border-radius: 50%;
+  background: var(--bg);
+  color: rgba(29, 78, 216, 0.95);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+  cursor: grab;
+  touch-action: none;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.12s ease;
+  pointer-events: auto;
+}
+
+.sheet-loop-band-wrap:hover .sheet-loop-move,
+.sheet-loop-move--dragging,
+.sheet-loop-move:focus-visible {
+  opacity: 1;
+}
+
+.sheet-loop-move--dragging {
+  cursor: grabbing;
+}
+
+.sheet-loop-move-icon {
+  display: block;
 }
 
 .sheet-loop-handle {

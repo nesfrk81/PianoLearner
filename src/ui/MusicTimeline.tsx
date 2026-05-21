@@ -1,3 +1,4 @@
+import { WHEEL_SEEK_ZONE_ATTR } from './timelineConstants'
 import { StaffCanvas } from './StaffCanvas'
 import { WaterfallPianoRoll } from './WaterfallPianoRoll'
 import { AlignedKeybed } from './AlignedKeybed'
@@ -22,6 +23,7 @@ type Props = {
   onSeek: (sec: number) => void
   onInitLoopRegion: (centerSec: number) => void
   onLoopBoundsChange: (a: number, b: number) => void
+  onLoopShift: (centerSec: number) => void
   loopSheetOverlay: boolean
   onCloseLoopSheetOverlay: () => void
 }
@@ -45,11 +47,15 @@ export function MusicTimeline({
   onSeek,
   onInitLoopRegion,
   onLoopBoundsChange,
+  onLoopShift,
   loopSheetOverlay,
   onCloseLoopSheetOverlay,
 }: Props) {
   return (
-    <div className="music-timeline synthesia-stack">
+    <div
+      className="music-timeline synthesia-stack"
+      {...{ [WHEEL_SEEK_ZONE_ATTR]: '' }}
+    >
       <StaffCanvas
         notes={notes}
         duration={duration}
@@ -63,6 +69,7 @@ export function MusicTimeline({
         userMidi={userMidi}
         onInitLoopRegion={onInitLoopRegion}
         onLoopBoundsChange={onLoopBoundsChange}
+        onLoopShift={onLoopShift}
         loopOverlayOpen={loopSheetOverlay}
         onCloseLoopOverlay={onCloseLoopSheetOverlay}
       />

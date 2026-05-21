@@ -8,6 +8,23 @@
   --accent-bg: rgba(124, 58, 237, 0.12);
   --accent-border: rgba(124, 58, 237, 0.45);
 
+  --midi-editor-bg: var(--code-bg);
+  --midi-editor-ruler-bg: var(--code-bg);
+  --midi-editor-grid-minor: rgba(0, 0, 0, 0.06);
+  --midi-editor-grid-major: rgba(0, 0, 0, 0.1);
+  --midi-editor-grid-bar: rgba(0, 0, 0, 0.16);
+  --midi-editor-row-line: rgba(0, 0, 0, 0.05);
+  --midi-editor-key-white: rgba(255, 255, 255, 0.85);
+  --midi-editor-key-black: rgba(0, 0, 0, 0.08);
+  --midi-editor-key-border: rgba(0, 0, 0, 0.08);
+  --midi-editor-key-label: rgba(0, 0, 0, 0.55);
+  --midi-editor-note: #c45f12;
+  --midi-editor-note-stroke: #e8893a;
+  --midi-editor-note-label: #ffffff;
+  --midi-editor-playhead: rgba(59, 130, 246, 0.9);
+  --midi-editor-playhead-glow: rgba(59, 130, 246, 0.35);
+  --midi-editor-ruler-text: rgba(0, 0, 0, 0.45);
+
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
@@ -30,6 +47,16 @@
     --accent: #a78bfa;
     --accent-bg: rgba(167, 139, 250, 0.15);
     --accent-border: rgba(167, 139, 250, 0.45);
+
+    --midi-editor-grid-minor: rgba(255, 255, 255, 0.04);
+    --midi-editor-grid-major: rgba(255, 255, 255, 0.08);
+    --midi-editor-grid-bar: rgba(255, 255, 255, 0.14);
+    --midi-editor-row-line: rgba(255, 255, 255, 0.05);
+    --midi-editor-key-white: rgba(255, 255, 255, 0.09);
+    --midi-editor-key-black: rgba(0, 0, 0, 0.35);
+    --midi-editor-key-border: rgba(255, 255, 255, 0.08);
+    --midi-editor-key-label: rgba(255, 255, 255, 0.55);
+    --midi-editor-ruler-text: rgba(255, 255, 255, 0.45);
   }
 }
 

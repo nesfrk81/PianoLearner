@@ -19,9 +19,9 @@ Practice piano from **MIDI files**: staff + falling notes aligned with an on-scr
 |--------|-----|
 | Play / pause | **Play** button or **Space** |
 | Seek | Click the **waterfall** (note lanes) |
-| Scrub time | **←** / **→** (±0.5 s) |
+| Scrub time | **←** / **→** or **scroll wheel** (±0.5 s; up = forward, down = back) |
 | Jump to start | **Home** or **Jump to start** |
-| Loop a section | Click the **sheet** to set a ~1 s loop, drag the **blue handles**, or use a **learned** Record control (see Settings → MIDI hardware) |
+| Loop a section | Click the **sheet** to set a loop; drag **blue edge handles** to trim, hover the band center and drag the **grip** to move it (overlay stays open until **Done**), or use a **learned** Record control (Settings → MIDI hardware) |
 | Clear loop | **Clear loop**, **Esc**, or press the learned Record control again while looping |
 
 ### USB MIDI keyboard
@@ -57,6 +57,16 @@ npm run build
 ```
 
 `dist/` is what GitHub Actions deploys to Pages (see `.github/workflows/deploy-pages.yml`).
+
+---
+
+## Documentation
+
+| Doc | Contents |
+|-----|----------|
+| [PRD.md](PRD.md) | Product requirements, architecture, subsystem map |
+| [docs/looper.md](docs/looper.md) | A/B loop behavior, MIDI knobs, sheet overlay scrolling |
+| [docs/notation-phase1.md](docs/notation-phase1.md) | Staff/timeline time contracts and notation v1 criteria |
 
 ---
 

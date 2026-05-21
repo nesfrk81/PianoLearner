@@ -7,9 +7,12 @@ import {
   useState,
 } from 'react'
 import { usePianoLearner } from './hooks/usePianoLearner'
+import { normalizeTrackIndices } from './midi/midiModel'
+import { MidiEditorPanel } from './ui/MidiEditorPanel'
 import { MidiMappingPanel } from './ui/MidiMappingPanel'
 import { SettingsModal } from './ui/SettingsModal'
 import { MusicTimeline } from './ui/MusicTimeline'
+import { TrackMultiselectDropdown } from './ui/TrackMultiselectDropdown'
 import { ChordPracticePanel } from './ui/ChordPracticePanel'
 import {
   KEYBED_KEY_OPTIONS,
@@ -306,170 +309,18 @@ function PracticeTracksDropdown({
   midiTrackDropdownBump: number
   playing: boolean
 }) {
-  const [open, setOpen] = useState(false)
-  const wrapRef = useRef<HTMLDivElement>(null)
-  const midiFocusRowRef = useRef<HTMLLabelElement | null>(null)
-
-  const selectableTracks = useMemo(
-    () => tracks.filter((t) => t.noteCount > 0),
-    [tracks],
-  )
-
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  useEffect(() => {
-    if (midiTrackDropdownBump <= 0) return
-    const id = requestAnimationFrame(() => setOpen(true))
-    return () => cancelAnimationFrame(id)
-  }, [midiTrackDropdownBump])
-
-  useEffect(() => {
-    if (!playing) return
-    const id = requestAnimationFrame(() => setOpen(false))
-    return () => cancelAnimationFrame(id)
-  }, [playing])
-
-  useEffect(() => {
-    if (!open || midiTrackFocusIndex == null) return
-    const id = requestAnimationFrame(() => {
-      midiFocusRowRef.current?.scrollIntoView({ block: 'nearest' })
-    })
-    return () => cancelAnimationFrame(id)
-  }, [open, midiTrackFocusIndex, midiTrackDropdownBump])
-
-  const selectedCount = selectedTrackIndices.length
-  const focusTrack =
-    midiTrackFocusIndex != null
-      ? selectableTracks.find((t) => t.index === midiTrackFocusIndex)
-      : undefined
-
-  const toggleTrack = (index: number) => {
-    setSelectedTrackIndices((prev) => {
-      const set = new Set(prev)
-      if (set.has(index)) {
-        if (set.size <= 1) return prev
-        set.delete(index)
-      } else {
-        set.add(index)
-      }
-      return Array.from(set).sort((a, b) => a - b)
-    })
-  }
-
-  if (selectableTracks.length === 0) {
-    return (
-      <div className="track-dropdown track-dropdown--empty">
-        <span className="practice-bar-tracks-label" id="practice-tracks-label">
-          Tracks
-        </span>
-        <span
-          className="track-dropdown-empty"
-          aria-labelledby="practice-tracks-label"
-        >
-          No tracks with notes
-        </span>
-      </div>
-    )
-  }
-
   return (
-    <div
-      className={'track-dropdown' + (open ? ' track-dropdown--open' : '')}
-      ref={wrapRef}
-    >
-      <span className="practice-bar-tracks-label" id="practice-tracks-label">
-        Tracks
-      </span>
-      <button
-        type="button"
-        className="track-dropdown-trigger"
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-labelledby="practice-tracks-label"
-        title={
-          focusTrack
-            ? `${selectedCount} track${selectedCount === 1 ? '' : 's'} in practice; MIDI knob targets “${focusTrack.name}”.`
-            : `${selectedCount} track${selectedCount === 1 ? '' : 's'} in practice.`
-        }
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span className="track-dropdown-trigger-text">
-          <span className="track-dropdown-summary-row">
-            <span className="track-dropdown-summary-selected">
-              {selectedCount} in practice
-            </span>
-            {focusTrack ? (
-              <>
-                <span className="track-dropdown-summary-sep" aria-hidden>
-                  {' '}
-                  ·{' '}
-                </span>
-                <span className="track-dropdown-summary-focus" title="MIDI knob / toggle target">
-                  {focusTrack.name}
-                </span>
-              </>
-            ) : null}
-          </span>
-        </span>
-        <span className="track-dropdown-chevron" aria-hidden>
-          ▼
-        </span>
-      </button>
-      {open ? (
-        <div
-          className="track-dropdown-panel"
-          role="listbox"
-          aria-multiselectable
-        >
-          {selectableTracks.map((t) => {
-            const checked = selectedTrackIndices.includes(t.index)
-            const isMidiFocus = midiTrackFocusIndex === t.index
-            return (
-              <label
-                key={t.index}
-                ref={isMidiFocus ? midiFocusRowRef : undefined}
-                className={
-                  'track-dropdown-row' +
-                  (checked ? ' track-dropdown-row--selected' : '') +
-                  (isMidiFocus ? ' track-dropdown-row--midi-focus' : '')
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleTrack(t.index)}
-                />
-                <span className="track-dropdown-row-label">
-                  <span className="track-dropdown-row-name">{t.name}</span>
-                  <span className="track-dropdown-row-meta">
-                    {t.noteCount} notes
-                    {isMidiFocus ? (
-                      <span className="track-dropdown-row-badge">MIDI</span>
-                    ) : null}
-                  </span>
-                </span>
-              </label>
-            )
-          })}
-        </div>
-      ) : null}
-    </div>
+    <TrackMultiselectDropdown
+      tracks={tracks}
+      selectedTrackIndices={selectedTrackIndices}
+      setSelectedTrackIndices={setSelectedTrackIndices}
+      label="Tracks"
+      summarySuffix="in practice"
+      focusTrackIndex={midiTrackFocusIndex}
+      openOnBump={midiTrackDropdownBump}
+      closeWhenPlaying
+      playing={playing}
+    />
   )
 }
 
@@ -479,19 +330,27 @@ export default function App() {
     loadKeybedKeyCount(),
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [midiEditorOpen, setMidiEditorOpen] = useState(false)
   const [playlistOpen, setPlaylistOpen] = useState(false)
   const playlistPopoverRef = useRef<HTMLDivElement>(null)
   const midiAddInputRef = useRef<HTMLInputElement>(null)
   const [loopSheetOverlay, setLoopSheetOverlay] = useState(false)
   const closeLoopSheetOverlay = useCallback(() => setLoopSheetOverlay(false), [])
   const keyboardTransportBlockedRef = useRef(false)
+  const midiEditorOpenRef = useRef(false)
+  const editorTransportRef = useRef<((timeSec: number) => void) | null>(null)
   useLayoutEffect(() => {
-    keyboardTransportBlockedRef.current = settingsOpen
-  }, [settingsOpen])
+    keyboardTransportBlockedRef.current = settingsOpen || midiEditorOpen
+  }, [midiEditorOpen, settingsOpen])
+  useLayoutEffect(() => {
+    midiEditorOpenRef.current = midiEditorOpen
+  }, [midiEditorOpen])
   const pl = usePianoLearner({
     onLoopCleared: closeLoopSheetOverlay,
     onLoopAtPlayhead: () => setLoopSheetOverlay(true),
     keyboardTransportBlockedRef,
+    midiEditorOpenRef,
+    editorTransportRef,
   })
 
   const {
@@ -535,11 +394,13 @@ export default function App() {
     midiConnected,
     playbackNotes,
     loopEnabled,
+    setLoopEnabled,
     loopA,
     setLoopA,
     loopB,
     setLoopB,
     initLoopAtCenter,
+    shiftLoopRegion,
     clearLoop,
     midiHardwareBindings,
     midiLearnMode,
@@ -565,7 +426,33 @@ export default function App() {
     restartLesson,
     previewNextChord,
     setPreviewNextChord,
+    midiHasPendingEdits,
+    applyMidiEdit,
+    commitMidiToIndexedDb,
   } = pl
+
+  /** Auto-suspend any active loop while the MIDI editor is open; restore on close. */
+  const prevLoopEnabledRef = useRef(false)
+  useEffect(() => {
+    if (midiEditorOpen) {
+      prevLoopEnabledRef.current = loopEnabled
+      if (loopEnabled) setLoopEnabled(false)
+    } else if (prevLoopEnabledRef.current) {
+      setLoopEnabled(true)
+      prevLoopEnabledRef.current = false
+    }
+    // We intentionally only react to midiEditorOpen transitions, not loopEnabled
+    // (otherwise restoring would immediately re-suspend in the same render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [midiEditorOpen])
+
+  useEffect(() => {
+    if (!midi) {
+      const id = requestAnimationFrame(() => setMidiEditorOpen(false))
+      return () => cancelAnimationFrame(id)
+    }
+    return undefined
+  }, [midi])
 
   useEffect(() => {
     saveKeybedKeyCount(keybedKeyCount)
@@ -592,6 +479,28 @@ export default function App() {
   )
 
   const duration = midi?.duration ?? 0
+
+  const midiInitialEditTracks = useMemo(() => {
+    if (!midi) return [0]
+    return normalizeTrackIndices(midi, selectedTrackIndices)
+  }, [midi, selectedTrackIndices])
+
+  const downloadEditedMidi = useCallback(() => {
+    if (!midi) return
+    const u8 = midi.toArray()
+    const copy = new Uint8Array(u8.byteLength)
+    copy.set(u8)
+    const blob = new Blob([copy], { type: 'audio/midi' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const name = fileName.trim()
+    a.download = /\.(mid|midi)$/i.test(name)
+      ? name
+      : `${name || 'edited'}.mid`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [midi, fileName])
 
   const initLoopFromSheet = useCallback(
     (centerSec: number) => {
@@ -657,7 +566,8 @@ export default function App() {
           <h1>Piano Learner</h1>
           <p className="app-sub">
             Sheet music on top, falling notes in the middle (hit the red line),
-            keys below — same columns. Space: play/pause. Arrows: ±0.5s. USB MIDI.
+            keys below — same columns. Space: play/pause. Arrows: ±0.5s; wheel over
+            the notes area: ±0.5s. USB MIDI.
             Home: jump to start.
           </p>
         </div>
@@ -1036,66 +946,113 @@ export default function App() {
             )}
           </section>
 
-          <div className="practice-bars">
-            <SegmentedBar
-              ariaLabel="Practice mode"
-              value={mode}
-              onChange={setMode}
-              items={[
-                { value: 'listen' as const, label: 'Listen', icon: <IconHeadphones /> },
-                { value: 'follow' as const, label: 'Follow', icon: <IconFollow /> },
-                { value: 'wait' as const, label: 'Wait', icon: <IconWait /> },
-              ]}
-            />
-            <SegmentedBar
-              ariaLabel="Practice hand"
-              value={handFilter}
-              onChange={setHandFilter}
-              items={[
-                { value: 'left' as const, label: 'L', icon: <IconLeftHand /> },
-                { value: 'both' as const, label: 'Both', icon: <IconBothHands /> },
-                { value: 'right' as const, label: 'R', icon: <IconRightHand /> },
-              ]}
-            />
-            <PracticeTracksDropdown
-              tracks={tracks}
-              selectedTrackIndices={selectedTrackIndices}
-              setSelectedTrackIndices={setSelectedTrackIndices}
-              midiTrackFocusIndex={midiTrackFocusIndex}
-              midiTrackDropdownBump={midiTrackDropdownBump}
-              playing={playing}
-            />
-          </div>
+          {!midiEditorOpen ? (
+            <div className="practice-bars">
+              <SegmentedBar
+                ariaLabel="Practice mode"
+                value={mode}
+                onChange={setMode}
+                items={[
+                  { value: 'listen' as const, label: 'Listen', icon: <IconHeadphones /> },
+                  { value: 'follow' as const, label: 'Follow', icon: <IconFollow /> },
+                  { value: 'wait' as const, label: 'Wait', icon: <IconWait /> },
+                ]}
+              />
+              <SegmentedBar
+                ariaLabel="Practice hand"
+                value={handFilter}
+                onChange={setHandFilter}
+                items={[
+                  { value: 'left' as const, label: 'L', icon: <IconLeftHand /> },
+                  { value: 'both' as const, label: 'Both', icon: <IconBothHands /> },
+                  { value: 'right' as const, label: 'R', icon: <IconRightHand /> },
+                ]}
+              />
+              <div className="practice-bar-tracks-cluster">
+                <PracticeTracksDropdown
+                  tracks={tracks}
+                  selectedTrackIndices={selectedTrackIndices}
+                  setSelectedTrackIndices={setSelectedTrackIndices}
+                  midiTrackFocusIndex={midiTrackFocusIndex}
+                  midiTrackDropdownBump={midiTrackDropdownBump}
+                  playing={playing}
+                />
+                <div className="practice-bar-tracks-actions">
+                  <button
+                    type="button"
+                    className="btn practice-bar-edit-btn"
+                    disabled={!midi}
+                    onClick={() => setMidiEditorOpen(true)}
+                    title="Edit MIDI notes"
+                  >
+                    Edit
+                  </button>
+                  {midiHasPendingEdits && midi ? (
+                    <button
+                      type="button"
+                      className="btn practice-bar-download-btn"
+                      onClick={downloadEditedMidi}
+                      title="Download edited MIDI file"
+                    >
+                      Download
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <section className="sheet-section">
-            <MusicTimeline
-              notes={playbackNotes}
-              duration={duration}
-              songTime={songTime}
-              getSongTime={getLiveSongTime}
-              minPitch={keybedMinMidi}
-              maxPitch={keybedMaxMidi}
-              splitMidi={splitMidi}
-              playing={playing}
-              loopEnabled={loopEnabled}
-              loopA={loopA}
-              loopB={loopB}
-              userMidi={userPressedMidi}
-              expectedMidi={expectedMidi}
-              fingeringMap={fingeringMap}
-              activeAdjustedTime={songTime - latencyMs / 1000}
-              onSeek={seek}
-              onInitLoopRegion={initLoopFromSheet}
-              onLoopBoundsChange={onLoopBoundsChange}
-              loopSheetOverlay={loopSheetOverlay}
-              onCloseLoopSheetOverlay={closeLoopSheetOverlay}
-            />
-            <p className="hint timeline-hint">
-              Orange = expected notes. Purple = your key press. Green = correct
-              hit. Click the staff to set a loop (drag the blue bars), Done or
-              Esc to close. Orange blocks fall to the red line — play as
-              they arrive. Click the waterfall to seek.
-            </p>
+            {midiEditorOpen && midi ? (
+              <MidiEditorPanel
+                midi={midi}
+                initialSelectedTrackIndices={midiInitialEditTracks}
+                fileName={fileName}
+                onClose={() => setMidiEditorOpen(false)}
+                applyMidiEdit={applyMidiEdit}
+                commitMidiToIndexedDb={commitMidiToIndexedDb}
+                onSelectedTrackIndicesChange={setSelectedTrackIndices}
+                playing={playing}
+                onTogglePlay={() => void togglePlay()}
+                songTime={songTime}
+                getLiveSongTime={getLiveSongTime}
+                transportFrameRef={editorTransportRef}
+                onSeek={seek}
+              />
+            ) : (
+              <>
+                <MusicTimeline
+                  notes={playbackNotes}
+                  duration={duration}
+                  songTime={songTime}
+                  getSongTime={getLiveSongTime}
+                  minPitch={keybedMinMidi}
+                  maxPitch={keybedMaxMidi}
+                  splitMidi={splitMidi}
+                  playing={playing}
+                  loopEnabled={loopEnabled}
+                  loopA={loopA}
+                  loopB={loopB}
+                  userMidi={userPressedMidi}
+                  expectedMidi={expectedMidi}
+                  fingeringMap={fingeringMap}
+                  activeAdjustedTime={songTime - latencyMs / 1000}
+                  onSeek={seek}
+                  onInitLoopRegion={initLoopFromSheet}
+                  onLoopBoundsChange={onLoopBoundsChange}
+                  onLoopShift={shiftLoopRegion}
+                  loopSheetOverlay={loopSheetOverlay}
+                  onCloseLoopSheetOverlay={closeLoopSheetOverlay}
+                />
+                <p className="hint timeline-hint">
+                  Orange = expected notes. Purple = your key press. Green =
+                  correct hit. Click the staff to set a loop (drag edges or
+                  center grip to move), Done or Esc to close. Orange blocks
+                  fall to the red line — play as they arrive. Click the
+                  waterfall to seek.
+                </p>
+              </>
+            )}
           </section>
         </>
       )}
