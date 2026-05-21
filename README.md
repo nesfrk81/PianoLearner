@@ -1,6 +1,6 @@
 # Piano Learner
 
-Practice piano from **MIDI files**: staff + falling notes aligned with an on-screen keyboard, **USB MIDI** input, A/B loops, and optional practice modes.
+Practice piano from **MIDI files**: staff + falling notes aligned with an on-screen keyboard, **USB MIDI** input, an **inline MIDI editor**, A/B loops, and optional practice modes.
 
 ## Use it online (GitHub Pages)
 
@@ -11,7 +11,8 @@ Practice piano from **MIDI files**: staff + falling notes aligned with an on-scr
 3. **Wait** for the piano soundfont to finish loading (progress is shown briefly).
 4. **Load a MIDI file** — use **Open MIDI file** and pick a `.mid` / `.midi` from your computer.
 5. **Play** — use the **Play** / **Pause** button or press **Space**.
-6. **Settings** — click the **gear** (top right) to change practice track, mode, input latency, MIDI touch sensitivity, and **MIDI hardware** bindings.
+6. **Edit (optional)** — click **Edit** in the practice bar to open the piano-roll editor; paint, move, or erase notes, then **Save to library** or **Download**.
+7. **Settings** — click the **gear** (top right) to change practice track, mode, input latency, MIDI touch sensitivity, and **MIDI hardware** bindings.
 
 ### Main controls
 
@@ -19,10 +20,11 @@ Practice piano from **MIDI files**: staff + falling notes aligned with an on-scr
 |--------|-----|
 | Play / pause | **Play** button or **Space** |
 | Seek | Click the **waterfall** (note lanes) |
-| Scrub time | **←** / **→** or **scroll wheel** (±0.5 s; up = forward, down = back) |
+| Scrub time | **←** / **→** or **scroll wheel** over the notes area (±0.5 s; up = forward, down = back) |
 | Jump to start | **Home** or **Jump to start** |
 | Loop a section | Click the **sheet** to set a loop; drag **blue edge handles** to trim, hover the band center and drag the **grip** to move it (overlay stays open until **Done**), or use a **learned** Record control (Settings → MIDI hardware) |
 | Clear loop | **Clear loop**, **Esc**, or press the learned Record control again while looping |
+| Edit MIDI | **Edit** (practice bar) — paint, erase, move, and resize notes on selected tracks; **Save to library** or **Download**; Space / ← / → / wheel / Ctrl+Z / Esc while the editor is open |
 
 ### USB MIDI keyboard
 
@@ -65,6 +67,7 @@ npm run build
 | Doc | Contents |
 |-----|----------|
 | [PRD.md](PRD.md) | Product requirements, architecture, subsystem map |
+| [docs/midi-editor.md](docs/midi-editor.md) | Inline piano-roll editor — layout, editing, save/download |
 | [docs/looper.md](docs/looper.md) | A/B loop behavior, MIDI knobs, sheet overlay scrolling |
 | [docs/notation-phase1.md](docs/notation-phase1.md) | Staff/timeline time contracts and notation v1 criteria |
 
